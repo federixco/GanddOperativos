@@ -1,0 +1,1609 @@
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\generar_sistema_txt.py
+
+...-------------------...
+
+import os
+
+def generar_documento_txt(ruta_base: str, archivo_salida: str):
+    """
+    Recorre recursivamente la ruta base y, para cada archivo con extensión .py o .json,
+    escribe su contenido en el archivo de salida, separando cada módulo con un separador.
+
+    Args:
+        ruta_base (str): Directorio base desde donde comenzar la búsqueda.
+        archivo_salida (str): Nombre del archivo TXT a generar.
+    """
+    separador = "\n...-------------------...\n"
+    with open(archivo_salida, "w", encoding="utf-8") as out_file:
+        for root, dirs, files in os.walk(ruta_base):
+            for archivo in files:
+                if archivo.endswith(".py") or archivo.endswith(".json"):
+                    ruta_archivo = os.path.join(root, archivo)
+                    # Escribe el encabezado del archivo
+                    out_file.write(separador)
+                    out_file.write(f"Archivo: {ruta_archivo}\n")
+                    out_file.write(separador)
+                    try:
+                        with open(ruta_archivo, "r", encoding="utf-8") as in_file:
+                            contenido = in_file.read()
+                        out_file.write(contenido)
+                    except Exception as e:
+                        out_file.write(f"Error al leer el archivo: {e}")
+                    out_file.write("\n")
+        out_file.write(separador)
+    print(f"Documento generado en: {archivo_salida}")
+
+if __name__ == "__main__":
+    # Si el script se encuentra al mismo nivel que main.py,
+    # establecemos la ruta base como el directorio actual.
+    ruta_base = os.path.dirname(os.path.realpath(__file__))
+    generar_documento_txt(ruta_base, "sistema_completo.txt")
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\gilada.py
+
+...-------------------...
+class Proceso:
+    def __init__(self, pid, arrival_time, bursts):
+        self.pid = pid
+        self.arrival_time = arrival_time
+        self.bursts = bursts[:]  # [CPU, IO, CPU, IO...]
+        self.bursts_original = bursts[:]
+        self.current_burst_index = 0
+        self.completion_time = None
+        self.start_time = None
+        self._seq = 0
+        self.remaining_time = sum(b for i, b in enumerate(bursts) if i % 2 == 0)
+
+    def is_cpu_burst(self):
+        return self.current_burst_index % 2 == 0
+
+    def advance_burst(self):
+        self.current_burst_index += 1
+
+def sjf_blocking(processes):
+    time = 0
+    gantt = []
+    ready = []
+    blocked = []
+    completed = 0
+    n = len(processes)
+
+    def collapse_zeros(p, t):
+        while p.current_burst_index < len(p.bursts) and p.bursts[p.current_burst_index] == 0:
+            p.advance_burst()
+        if p.current_burst_index >= len(p.bursts):
+            p.completion_time = t
+            return True
+        return False
+
+    while completed < n:
+        # desbloqueos
+        for (bp, unb) in blocked[:]:
+            if unb == time:
+                blocked.remove((bp, unb))
+                bp.advance_burst()
+                if collapse_zeros(bp, time):
+                    completed += 1
+                    continue
+                if bp.is_cpu_burst():
+                    ready.append(bp)
+                else:
+                    dur = bp.bursts[bp.current_burst_index]
+                    blocked.append((bp, time+dur))
+
+        # llegadas
+        for p in processes:
+            if p.arrival_time == time and p.completion_time is None and p not in ready and all(bp is not p for bp, _ in blocked):
+                if collapse_zeros(p, time):
+                    completed += 1
+                    continue
+                if p.is_cpu_burst():
+                    ready.append(p)
+                else:
+                    dur = p.bursts[p.current_burst_index]
+                    blocked.append((p, time+dur))
+
+        # si no hay listos
+        if not ready:
+            next_event = min(
+                [unb for _, unb in blocked] +
+                [p.arrival_time for p in processes if p.completion_time is None and p.arrival_time > time],
+                default=None
+            )
+            if next_event is None:
+                time += 1
+            elif next_event > time:
+                time = next_event
+            else:
+                time += 1
+            continue
+
+        # elegir más corto (FIFO en empates)
+        ready.sort(key=lambda x: (x.bursts[x.current_burst_index], x.arrival_time, x._seq))
+        current = ready.pop(0)
+        if current.start_time is None:
+            current.start_time = time
+
+        # ejecutar ráfaga completa
+        start = time
+        cpu_dur = current.bursts[current.current_burst_index]
+        time += cpu_dur
+        current.remaining_time -= cpu_dur
+        gantt.append((current.pid, start, time, "CPU"))
+
+        # avanzar
+        current.advance_burst()
+        if collapse_zeros(current, time):
+            completed += 1
+            continue
+        if current.is_cpu_burst():
+            ready.append(current)
+        else:
+            dur = current.bursts[current.current_burst_index]
+            blocked.append((current, time+dur))
+
+    return gantt
+
+# Datos del ejercicio
+datos = [
+    ("A", 0, [6, 2, 3]),
+    ("B", 0, [3, 3, 3]),
+    ("C", 1, [1, 2, 1]),
+    ("D", 1, [4, 3, 3]),
+    ("E", 3, [5, 1, 4]),
+    ("F", 3, [3, 2, 2]),
+    ("G", 4, [2, 1, 2]),
+    ("H", 5, [4, 4, 3]),
+    ("I", 6, [3])
+]
+
+procesos = []
+for idx, (pid, arr, bursts) in enumerate(datos):
+    p = Proceso(pid, arr, bursts)
+    p._seq = idx
+    procesos.append(p)
+
+gantt = sjf_blocking(procesos)
+
+# Mostrar solo el orden de CPU
+orden_cpu = [pid for pid, s, e, tipo in gantt if tipo == "CPU"]
+print("Orden de ejecución de CPU:", orden_cpu)
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\main.py
+
+...-------------------...
+import customtkinter as ctk
+from GUI.start_screen import StartScreen
+from GUI.name_input_screen import NameInputScreen
+from GUI.data_input_screen import DataInputScreen
+from GUI.algorithm_screen import AlgorithmScreen
+
+# --- Funciones de navegación entre pantallas ---
+
+def ir_a_nombres(cantidad):
+    limpiar_ventana()
+    name_screen = NameInputScreen(root, cantidad, ir_a_tiempos)
+    name_screen.pack(fill="both", expand=True)
+
+def ir_a_tiempos(nombres):
+    limpiar_ventana()
+    data_screen = DataInputScreen(root, nombres, ir_a_algoritmo)
+    data_screen.pack(fill="both", expand=True)
+
+def ir_a_algoritmo(procesos_data):
+    limpiar_ventana()
+    algo_screen = AlgorithmScreen(root, procesos_data, volver_inicio)
+    algo_screen.pack(fill="both", expand=True)
+
+def volver_inicio():
+    limpiar_ventana()
+    start_screen = StartScreen(root, ir_a_nombres)
+    start_screen.pack(fill="both", expand=True)
+
+def limpiar_ventana():
+    """Elimina todos los widgets de la ventana principal."""
+    for widget in root.winfo_children():
+        widget.destroy()
+
+# --- Configuración inicial de la app ---
+if __name__ == "__main__":
+    ctk.set_appearance_mode("dark")  # Modo oscuro
+    ctk.set_default_color_theme("blue")  # Tema azul
+
+    root = ctk.CTk()
+    root.title("Simulador de Planificación de CPU")
+    root.geometry("800x600")
+
+    # Pantalla inicial
+    start_screen = StartScreen(root, ir_a_nombres)
+    start_screen.pack(fill="both", expand=True)
+
+    root.mainloop()
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\fifo.py
+
+...-------------------...
+from copy import deepcopy
+
+def fifo(process_list):
+    """
+    FIFO no expulsivo sin bloqueos.
+    Usa Process con bursts=[CPU] y remaining_time inicializado.
+    Devuelve gantt en 3-tuplas: (pid, start, end).
+    """
+    processes = deepcopy(process_list)
+    time = 0
+    gantt = []
+    ready = []
+    completed = 0
+    n = len(processes)
+
+    # ordenar por llegada para consistencia (no obligatorio)
+    processes.sort(key=lambda p: p.arrival_time)
+
+    while completed < n:
+        # Encolar llegadas al tiempo actual
+        for p in processes:
+            if p.start_time is None and p.arrival_time <= time and p not in ready and p.completion_time is None:
+                ready.append(p)
+
+        if ready:
+            current = ready.pop(0)
+            if current.start_time is None:
+                current.start_time = time
+
+            start = time
+            cpu = current.remaining_time  # equivale a bursts[0]
+            time += cpu
+            gantt.append((current.pid, start, time))
+
+            current.completion_time = time
+            current.calculate_metrics()
+            completed += 1
+        else:
+            # No hay listos: avanzar 1 y reintentar
+            time += 1
+
+    return gantt, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\fifo_blocking.py
+
+...-------------------...
+from copy import deepcopy
+
+def fifo_blocking(process_list):
+    processes = deepcopy(process_list)
+    time = 0
+    gantt_chart = []
+    ready_queue = []
+    blocked_queue = []  # (proceso, unblock_time)
+    completed = 0
+    n = len(processes)
+
+    current = None
+    start_time = None
+
+    while completed < n:
+        # 1) Llegadas
+        for p in processes:
+            if (
+                p.arrival_time == time
+                and p.completion_time is None
+                and p not in ready_queue
+                and all(bp is not p for bp, _ in blocked_queue)
+                and p is not current
+            ):
+                if p.is_cpu_burst():
+                    ready_queue.append(p)
+                else:
+                    dur = p.bursts[p.current_burst_index]
+                    if dur > 0:
+                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))
+                        blocked_queue.append((p, time + dur))
+                    else:
+                        p.advance_burst()
+                        if p.current_burst_index >= len(p.bursts):
+                            p.completion_time = time
+                            completed += 1
+                        elif p.is_cpu_burst():
+                            ready_queue.append(p)
+                        else:
+                            dur2 = p.bursts[p.current_burst_index]
+                            if dur2 > 0:
+                                gantt_chart.append((p.pid, time, time + dur2, "BLOCK"))
+                                blocked_queue.append((p, time + dur2))
+                            else:
+                                p.advance_burst()
+                                if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
+                                    ready_queue.append(p)
+
+        # 2) Desbloqueos que vencen ahora
+        for (bp, unblock_time) in blocked_queue[:]:
+            if unblock_time == time:
+                blocked_queue.remove((bp, unblock_time))
+                bp.advance_burst()
+                if bp.current_burst_index >= len(bp.bursts):
+                    bp.completion_time = time
+                    completed += 1
+                else:
+                    if bp.is_cpu_burst():
+                        ready_queue.append(bp)
+                    else:
+                        dur2 = bp.bursts[bp.current_burst_index]
+                        if dur2 > 0:
+                            gantt_chart.append((bp.pid, time, time + dur2, "BLOCK"))
+                            blocked_queue.append((bp, time + dur2))
+                        else:
+                            bp.advance_burst()
+                            if bp.current_burst_index >= len(bp.bursts):
+                                bp.completion_time = time
+                                completed += 1
+                            elif bp.is_cpu_burst():
+                                ready_queue.append(bp)
+
+        # 3) Selección FIFO
+        if current is None and ready_queue:
+            current = ready_queue.pop(0)
+            start_time = time
+            if current.start_time is None:
+                current.start_time = time  # solo la primera vez que toca CPU
+
+        # 4) Ejecutar 1 tick de CPU o avanzar tiempo si no hay listos
+        if current:
+            current.remaining_time -= 1
+            time += 1
+
+            # ¿Terminó esta ráfaga de CPU?
+            if current.remaining_time == 0:
+                # Cerrar tramo de CPU
+                gantt_chart.append((current.pid, start_time, time, "CPU"))
+
+                # Avanzar a la siguiente ráfaga
+                current.advance_burst()
+
+                # ¿Proceso terminado?
+                if current.current_burst_index >= len(current.bursts):
+                    current.completion_time = time
+                    completed += 1
+                    current = None
+                else:
+                    # ¿Siguiente es CPU?
+                    if current.is_cpu_burst():
+                        ready_queue.append(current)
+                        current = None
+                    else:
+                        # Siguiente es BLOQUEO
+                        dur = current.bursts[current.current_burst_index]
+                        if dur > 0:
+                            gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
+                            blocked_queue.append((current, time + dur))
+                            current = None
+                        else:
+                            # Bloqueo de 0 → saltar
+                            current.advance_burst()
+                            if current.current_burst_index >= len(current.bursts):
+                                current.completion_time = time
+                                completed += 1
+                                current = None
+                            elif current.is_cpu_burst():
+                                ready_queue.append(current)
+                                current = None
+        else:
+            # No hay proceso ejecutando ni listo: avanzar tiempo “vacío” (no pintamos IDLE)
+            time += 1
+
+    return gantt_chart, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\roundrobin.py
+
+...-------------------...
+from copy import deepcopy
+from collections import deque
+
+def round_robin(process_list, quantum):
+    processes = deepcopy(process_list)
+    n = len(processes)
+    time = 0
+    completed = 0
+    gantt_chart = []
+
+    ready_queue = deque()
+    procesos_pendientes = sorted(processes, key=lambda p: p.arrival_time)
+
+    current_pid = None
+    start_time = None
+
+    while completed < n:
+        # Agregar procesos que llegan en este instante
+        for p in procesos_pendientes:
+            if p.arrival_time == time and p not in ready_queue and p.remaining_time > 0:
+                ready_queue.append(p)
+
+        if ready_queue:
+            current = ready_queue.popleft()
+
+            # Cambio de proceso en ejecución
+            if current_pid != current.pid:
+                if current_pid is not None:
+                    gantt_chart.append((current_pid, start_time, time))
+                current_pid = current.pid
+                start_time = time
+                if current.start_time is None:
+                    current.start_time = time
+
+            # Ejecutar hasta quantum o hasta que termine
+            exec_time = min(quantum, current.remaining_time)
+            current.remaining_time -= exec_time
+            time += exec_time
+
+            # Agregar procesos que llegaron mientras este ejecutaba
+            for p in procesos_pendientes:
+                if time - exec_time < p.arrival_time <= time and p.remaining_time > 0 and p not in ready_queue:
+                    ready_queue.append(p)
+
+            if current.remaining_time > 0:
+                ready_queue.append(current)
+            else:
+                current.completion_time = time
+                current.calculate_metrics()
+                completed += 1
+        else:
+            # CPU ociosa
+            if current_pid != "IDLE":
+                if current_pid is not None:
+                    gantt_chart.append((current_pid, start_time, time))
+                current_pid = "IDLE"
+                start_time = time
+            time += 1
+
+    # Cerrar el último bloque
+    if current_pid is not None:
+        gantt_chart.append((current_pid, start_time, time))
+
+    return gantt_chart, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\round_robin_blocking.py
+
+...-------------------...
+from copy import deepcopy
+from collections import deque
+
+def round_robin_blocking(process_list, quantum):
+    processes = deepcopy(process_list)
+    time = 0
+    gantt_chart = []
+    ready_queue = deque()
+    blocked_queue = []  # (proceso, unblock_time)
+    completed = 0
+    n = len(processes)
+
+    current = None
+    start_time = None
+    quantum_counter = 0
+
+    while completed < n:
+        # 1) Llegadas
+        for p in processes:
+            if (
+                p.arrival_time == time
+                and p.completion_time is None
+                and p not in ready_queue
+                and all(bp is not p for bp, _ in blocked_queue)
+                and p is not current
+            ):
+                if p.is_cpu_burst():
+                    ready_queue.append(p)
+                else:
+                    dur = p.bursts[p.current_burst_index]
+                    if dur > 0:
+                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))
+                        blocked_queue.append((p, time + dur))
+                    else:
+                        p.advance_burst()
+                        if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
+                            ready_queue.append(p)
+
+        # 2) Desbloqueos
+        for (bp, unblock_time) in blocked_queue[:]:
+            if unblock_time == time:
+                blocked_queue.remove((bp, unblock_time))
+                bp.advance_burst()
+                if bp.current_burst_index >= len(bp.bursts):
+                    bp.completion_time = time
+                    completed += 1
+                else:
+                    if bp.is_cpu_burst():
+                        ready_queue.append(bp)
+                    else:
+                        dur2 = bp.bursts[bp.current_burst_index]
+                        if dur2 > 0:
+                            gantt_chart.append((bp.pid, time, time + dur2, "BLOCK"))
+                            blocked_queue.append((bp, time + dur2))
+                        else:
+                            bp.advance_burst()
+                            if bp.current_burst_index < len(bp.bursts) and bp.is_cpu_burst():
+                                ready_queue.append(bp)
+
+        # 3) Selección RR
+        if current is None and ready_queue:
+            current = ready_queue.popleft()
+            start_time = time
+            quantum_counter = 0
+            if current.start_time is None:
+                current.start_time = time
+
+        # 4) Ejecutar
+        if current:
+            current.remaining_time -= 1
+            quantum_counter += 1
+            time += 1
+
+            # Si terminó ráfaga de CPU
+            if current.remaining_time == 0:
+                gantt_chart.append((current.pid, start_time, time, "CPU"))
+                current.advance_burst()
+                if current.current_burst_index >= len(current.bursts):
+                    current.completion_time = time
+                    completed += 1
+                    current = None
+                else:
+                    if current.is_cpu_burst():
+                        ready_queue.append(current)
+                        current = None
+                    else:
+                        dur = current.bursts[current.current_burst_index]
+                        if dur > 0:
+                            gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
+                            blocked_queue.append((current, time + dur))
+                        else:
+                            current.advance_burst()
+                            if current.current_burst_index < len(current.bursts) and current.is_cpu_burst():
+                                ready_queue.append(current)
+                        current = None
+
+            # Si se agotó el quantum pero no terminó CPU
+            elif quantum_counter >= quantum:
+                gantt_chart.append((current.pid, start_time, time, "CPU"))
+                ready_queue.append(current)
+                current = None
+
+        else:
+            # Si no hay listos pero sí bloqueados, saltar al próximo desbloqueo
+            if blocked_queue:
+                next_unblock = min(unblock_time for _, unblock_time in blocked_queue)
+                time = max(time, next_unblock)
+            else:
+                time += 1
+
+    return gantt_chart, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\sjf.py
+
+...-------------------...
+from copy import deepcopy
+
+def sjf(process_list):
+    """
+    SJF no expulsivo sin bloqueos.
+    Usa Process con bursts=[CPU] y remaining_time inicializado.
+    Devuelve gantt en 3-tuplas: (pid, start, end).
+    """
+    processes = deepcopy(process_list)
+    time = 0
+    gantt = []
+    completed = 0
+    n = len(processes)
+
+    # Para evitar reuso accidental
+    for p in processes:
+        # remaining_time ya viene de Process(bursts=[cpu])
+        pass
+
+    while completed < n:
+        # Elegibles: llegaron y no completados
+        elegibles = [p for p in processes if p.arrival_time <= time and p.completion_time is None]
+
+        if not elegibles:
+            time += 1
+            continue
+
+        # Elegir el de menor remaining_time (única ráfaga de CPU)
+        current = min(elegibles, key=lambda p: p.remaining_time)
+
+        if current.start_time is None:
+            current.start_time = time
+
+        start = time
+        cpu = current.remaining_time
+        time += cpu
+        gantt.append((current.pid, start, time))
+
+        current.completion_time = time
+        current.calculate_metrics()
+        completed += 1
+
+    return gantt, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\sjf_blocking.py
+
+...-------------------...
+from copy import deepcopy
+
+def sjf_blocking(process_list):
+    processes = deepcopy(process_list)
+
+    for idx, p in enumerate(processes):
+        if not hasattr(p, "bursts_original"):
+            p.bursts_original = p.bursts[:]
+        p._seq = idx
+        p.remaining_time = sum(b for i, b in enumerate(p.bursts) if i % 2 == 0)
+
+    time = 0
+    gantt = []
+    ready = []
+    blocked = []
+    completed = 0
+    n = len(processes)
+    arrived = set()
+
+    def collapse_zeros(proc, t):
+        while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
+            proc.advance_burst()
+        if proc.current_burst_index >= len(proc.bursts):
+            proc.completion_time = t
+            return True
+        return False
+
+    def enqueue_arrivals(t):
+        nonlocal completed
+        for p in processes:
+            if p.pid in arrived:
+                continue
+            if p.arrival_time <= t and p.completion_time is None:
+                arrived.add(p.pid)
+                if collapse_zeros(p, t):
+                    completed += 1
+                    continue
+                if p.is_cpu_burst():
+                    ready.append(p)
+                else:
+                    dur = p.bursts[p.current_burst_index]
+                    gantt.append((p.pid, t, t + dur, "BLOCK"))
+                    blocked.append((p, t + dur))
+
+    while completed < n:
+        # desbloqueos
+        for (bp, unb) in blocked[:]:
+            if unb == time:
+                blocked.remove((bp, unb))
+                bp.advance_burst()
+                if collapse_zeros(bp, time):
+                    completed += 1
+                    continue
+                if bp.is_cpu_burst():
+                    ready.append(bp)
+                else:
+                    dur = bp.bursts[bp.current_burst_index]
+                    gantt.append((bp.pid, time, time + dur, "BLOCK"))
+                    blocked.append((bp, time + dur))
+
+        # llegadas
+        enqueue_arrivals(time)
+
+        # si no hay listos
+        if not ready:
+            future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived]
+            future_unblocks = [unb for _, unb in blocked]
+            if not future_arrivals and not future_unblocks:
+                # nada más por hacer → romper
+                break
+            if future_arrivals or future_unblocks:
+                next_event = min(future_arrivals + future_unblocks)
+                if next_event > time:
+                    gantt.append(("IDLE", time, next_event, "IDLE"))
+                    time = next_event
+                else:
+                    time += 1
+            else:
+                time += 1
+            continue
+
+        # elegir más corto (FIFO en empates)
+        ready.sort(key=lambda x: (x.bursts[x.current_burst_index], x.arrival_time, x._seq))
+        current = ready.pop(0)
+        if current.start_time is None:
+            current.start_time = time
+
+        # ejecutar ráfaga completa
+        start = time
+        cpu_dur = current.bursts[current.current_burst_index]
+        time += cpu_dur
+        current.remaining_time -= cpu_dur
+        gantt.append((current.pid, start, time, "CPU"))
+
+        # avanzar
+        current.advance_burst()
+        if collapse_zeros(current, time):
+            completed += 1
+            enqueue_arrivals(time)
+            continue
+        if current.is_cpu_burst():
+            ready.append(current)
+        else:
+            dur = current.bursts[current.current_burst_index]
+            gantt.append((current.pid, time, time + dur, "BLOCK"))
+            blocked.append((current, time + dur))
+
+        enqueue_arrivals(time)
+
+    return gantt, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\srtf.py
+
+...-------------------...
+from copy import deepcopy
+
+def srtf(process_list):
+    """
+    Simula la planificación SRTF (Shortest Remaining Time First, expulsivo).
+
+    :param process_list: lista de objetos Process
+    :return: (gantt_chart, procesos_con_metricas)
+    """
+    processes = deepcopy(process_list)
+    n = len(processes)
+    completed = 0
+    time = 0
+    gantt_chart = []
+
+    # Para controlar cambios de proceso
+    current_pid = None
+    start_time = None
+
+    while completed < n:
+        # Filtrar procesos listos y no completados
+        ready_queue = [p for p in processes if p.arrival_time <= time and p.remaining_time > 0]
+
+        if ready_queue:
+            # Elegir el de menor tiempo restante
+            ready_queue.sort(key=lambda x: x.remaining_time)
+            current = ready_queue[0]
+
+            # Si cambia el proceso en ejecución, cerramos el bloque anterior
+            if current_pid != current.pid:
+                if current_pid is not None:
+                    gantt_chart.append((current_pid, start_time, time))
+                current_pid = current.pid
+                start_time = time
+                if current.start_time is None:
+                    current.start_time = time
+
+            # Ejecutar 1 unidad de tiempo
+            current.remaining_time -= 1
+            time += 1
+
+            # Si termina
+            if current.remaining_time == 0:
+                current.completion_time = time
+                current.calculate_metrics()
+                completed += 1
+        else:
+            # CPU ociosa
+            if current_pid != "IDLE":
+                if current_pid is not None:
+                    gantt_chart.append((current_pid, start_time, time))
+                current_pid = "IDLE"
+                start_time = time
+            time += 1
+
+    # Cerrar el último bloque
+    if current_pid is not None:
+        gantt_chart.append((current_pid, start_time, time))
+
+    return gantt_chart, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\srtf_blocking.py
+
+...-------------------...
+from copy import deepcopy
+
+def srtf_blocking(process_list):
+    """
+    SRTF expulsivo con soporte para procesos mixtos (con y sin bloqueos).
+    - Criterio: CPU total restante (CPU actual + futuras CPUs).
+    - arrival_time nunca se modifica.
+    - Bloqueos manejados con unblock_time (sin restar tick a tick).
+    - Gantt: (pid, start, end, tipo) con tipo en {"CPU","BLOCK"}.
+    """
+
+    def total_cpu_restante(p):
+        """Suma CPU restante de la ráfaga actual + CPUs futuras."""
+        idx = p.current_burst_index
+        if idx >= len(p.bursts):
+            return 0
+        if idx % 2 == 0:  # CPU
+            total = p.remaining_time
+            for i in range(idx + 2, len(p.bursts), 2):
+                total += p.bursts[i]
+            return total
+        return float("inf")  # si está en bloqueo, no debería estar en ready
+
+    processes = deepcopy(process_list)
+    time = 0
+    gantt_chart = []
+    ready_queue = []
+    blocked_queue = []  # (proceso, unblock_time)
+    completed = 0
+    n = len(processes)
+
+    current = None
+    start_time = None
+
+    while completed < n:
+        # 1) Llegadas
+        for p in processes:
+            if (
+                p.arrival_time == time
+                and p.completion_time is None
+                and p not in ready_queue
+                and all(bp is not p for bp, _ in blocked_queue)
+                and p is not current
+            ):
+                if p.is_cpu_burst():
+                    ready_queue.append(p)
+                else:
+                    dur = p.bursts[p.current_burst_index]
+                    if dur > 0:
+                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))
+                        blocked_queue.append((p, time + dur))
+                    else:
+                        p.advance_burst()
+                        ready_queue.append(p)
+
+        # 2) Desbloqueos
+        for (bp, unblock_time) in blocked_queue[:]:
+            if unblock_time == time:
+                blocked_queue.remove((bp, unblock_time))
+                bp.advance_burst()
+                if bp.current_burst_index >= len(bp.bursts):
+                    bp.completion_time = time
+                    bp.calculate_metrics()
+                    completed += 1
+                else:
+                    if bp.is_cpu_burst():
+                        ready_queue.append(bp)
+                    else:
+                        dur2 = bp.bursts[bp.current_burst_index]
+                        if dur2 > 0:
+                            gantt_chart.append((bp.pid, time, time + dur2, "BLOCK"))
+                            blocked_queue.append((bp, time + dur2))
+                        else:
+                            bp.advance_burst()
+                            ready_queue.append(bp)
+
+        # 3) Selección SRTF por CPU total restante
+        eligibles = [p for p in ready_queue if p.is_cpu_burst()]
+        if eligibles:
+            candidate = min(eligibles, key=total_cpu_restante)
+            if current is not candidate:
+                if current is not None:
+                    gantt_chart.append((current.pid, start_time, time, "CPU"))
+                current = candidate
+                start_time = time
+                if current.start_time is None:
+                    current.start_time = time
+        else:
+            # No hay listos, avanzar tiempo
+            time += 1
+            continue
+
+        # 4) Ejecutar 1 unidad
+        current.remaining_time -= 1
+        time += 1
+
+        # 5) ¿Terminó la ráfaga de CPU?
+        if current.remaining_time == 0:
+            gantt_chart.append((current.pid, start_time, time, "CPU"))
+            if current in ready_queue:
+                ready_queue.remove(current)
+            current.advance_burst()
+
+            if current.current_burst_index >= len(current.bursts):
+                current.completion_time = time
+                current.calculate_metrics()
+                completed += 1
+                current = None
+            else:
+                if current.is_cpu_burst():
+                    ready_queue.append(current)
+                    current = None
+                else:
+                    dur = current.bursts[current.current_burst_index]
+                    if dur > 0:
+                        gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
+                        blocked_queue.append((current, time + dur))
+                    else:
+                        current.advance_burst()
+                        ready_queue.append(current)
+                    current = None
+
+    # Cierre por seguridad
+    if current is not None:
+        gantt_chart.append((current.pid, start_time, time, "CPU"))
+
+    return gantt_chart, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\__init__.py
+
+...-------------------...
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\algorithm_screen.py
+
+...-------------------...
+import customtkinter as ctk
+from tkinter import messagebox, ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+
+from models.process import Process
+# Algoritmos sin bloqueos
+from algoritmos.fifo import fifo
+from algoritmos.sjf import sjf
+from algoritmos.srtf import srtf
+from algoritmos.roundrobin import round_robin
+# Algoritmos con bloqueos
+from algoritmos.fifo_blocking import fifo_blocking
+from algoritmos.sjf_blocking import sjf_blocking
+from algoritmos.srtf_blocking import srtf_blocking
+from algoritmos.round_robin_blocking import round_robin_blocking
+
+from utils.metricas import calcular_metricas
+
+
+class AlgorithmScreen(ctk.CTkFrame):
+    def __init__(self, master, procesos_data, volver_inicio):
+        super().__init__(master)
+        self.procesos_data = procesos_data
+        self.volver_inicio = volver_inicio
+
+        # --- Selección de algoritmo ---
+        self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
+        self.label_title.pack(pady=10)
+
+        self.algoritmos = ["FIFO", "SJF", "SRTF", "Round Robin"]
+        self.selected_algo = ctk.StringVar(value=self.algoritmos[0])
+        self.option_menu = ctk.CTkOptionMenu(
+            self, values=self.algoritmos, variable=self.selected_algo, command=self._on_algo_change
+        )
+        self.option_menu.pack(pady=5)
+
+        # --- Botones de control ---
+        btn_frame = ctk.CTkFrame(self)
+        btn_frame.pack(pady=10)
+        self.btn_run = ctk.CTkButton(btn_frame, text="Ejecutar", command=self._run_algorithm)
+        self.btn_run.pack(side="left", padx=5)
+        self.btn_new = ctk.CTkButton(btn_frame, text="Nuevo ejercicio", command=self.volver_inicio)
+        self.btn_new.pack(side="left", padx=5)
+        self.btn_exit = ctk.CTkButton(
+            btn_frame, text="Salir", fg_color="red", hover_color="#aa0000", command=self._salir
+        )
+        self.btn_exit.pack(side="left", padx=5)
+
+        # --- Campo quantum (solo si RR) ---
+        self.frame_quantum = ctk.CTkFrame(self)
+        self.label_quantum = ctk.CTkLabel(self.frame_quantum, text="Quantum:")
+        self.label_quantum.pack(side="left", padx=5)
+        self.entry_quantum = ctk.CTkEntry(self.frame_quantum, placeholder_text="Ej: 2", width=60)
+        self.entry_quantum.pack(side="left", padx=5)
+
+        # --- Tabla BCP ---
+        self.tree = ttk.Treeview(self, columns=("PID", "Llegada", "CPU", "TR", "TE"), show="headings", height=8)
+        for col in ("PID", "Llegada", "CPU", "TR", "TE"):
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=80, anchor="center")
+        self.tree.pack(pady=10, fill="x")
+
+        # --- Label promedios ---
+        self.label_promedios = ctk.CTkLabel(self, text="TRM: -    |    TEM: -", font=("Arial", 14))
+        self.label_promedios.pack(pady=5)
+
+        # --- Frame gráfico ---
+        self.frame_gantt = ctk.CTkFrame(self)
+        self.frame_gantt.pack(pady=10, fill="both", expand=True)
+
+    def _on_algo_change(self, value):
+        if value == "Round Robin":
+            self.frame_quantum.pack(before=self.tree, pady=5)
+        else:
+            self.frame_quantum.pack_forget()
+
+    def _run_algorithm(self):
+        procesos = [Process(p["pid"], p["arrival_time"], p["bursts"]) for p in self.procesos_data]
+        algo = self.selected_algo.get()
+
+        try:
+            if algo == "FIFO":
+                gantt, result = fifo_blocking(procesos)
+            elif algo == "SJF":
+                gantt, result = sjf_blocking(procesos)
+            elif algo == "SRTF":
+                gantt, result = srtf_blocking(procesos)
+            elif algo == "Round Robin":
+                quantum = self._get_quantum()
+                if quantum is None:
+                    return
+                gantt, result = round_robin_blocking(procesos, quantum)
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error al ejecutar: {e}")
+            return
+
+        # Calcular métricas
+        metricas, trm, tem = calcular_metricas(result)
+
+        # Actualizar tabla
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+        for m in metricas:
+            self.tree.insert("", "end", values=(m["PID"], m["Llegada"], m["CPU"], m["TR"], m["TE"]))
+
+        # Actualizar promedios
+        self.label_promedios.configure(
+            text=f"TRM (Tiempo de Respuesta Medio): {trm:.2f}    |    TEM (Tiempo de Espera Medio): {tem:.2f}"
+        )
+
+        # Mostrar gráfico
+        self._mostrar_gantt_embebido(gantt, algo)
+
+    def _get_quantum(self):
+        try:
+            quantum = int(self.entry_quantum.get())
+            if quantum <= 0:
+                raise ValueError
+            return quantum
+        except ValueError:
+            messagebox.showerror("Error", "Ingrese un quantum válido (> 0)")
+            return None
+
+    def _mostrar_gantt_embebido(self, gantt_chart, algo):
+        for widget in self.frame_gantt.winfo_children():
+            widget.destroy()
+
+        norm = []
+        for seg in gantt_chart:
+            if len(seg) == 3:
+                pid, start, end = seg
+                tipo = "CPU" if pid != "IDLE" else "IDLE"
+                norm.append((pid, start, end, tipo))
+            elif len(seg) == 4:
+                norm.append(seg)
+
+        fig, ax = plt.subplots(figsize=(8, 3))
+        procesos_unicos = [pid for pid, _, _, tipo in norm if pid != "IDLE"]
+        procesos_unicos = list(dict.fromkeys(procesos_unicos))
+        y_positions = {pid: i for i, pid in enumerate(procesos_unicos)}
+
+        colors = {}
+        color_palette = plt.cm.get_cmap("tab20", len(procesos_unicos) + 1)
+
+        for pid, start, end, tipo in norm:
+            if tipo == "IDLE":
+                color = "lightgray"
+                hatch = None
+                y = -1
+            elif tipo == "BLOCK":
+                color = "black"
+                hatch = "//"
+                y = y_positions.get(pid, 0)
+            else:
+                if pid not in colors:
+                    colors[pid] = color_palette(len(colors))
+                color = colors[pid]
+                hatch = None
+                y = y_positions.get(pid, 0)
+
+            ax.barh(y, end - start, left=start, height=0.5, color=color, edgecolor='black', hatch=hatch)
+            if tipo != "IDLE":
+                ax.text((start + end) / 2, y, str(pid), ha='center', va='center',
+                        fontsize=8, color="white" if tipo == "BLOCK" else "black")
+
+        if procesos_unicos:
+            ax.set_yticks(list(y_positions.values()))
+            ax.set_yticklabels(list(y_positions.keys()))
+        else:
+            ax.set_yticks([])
+
+        if norm:
+            max_time = max(end for _, _, end, _ in norm)
+            ax.set_xticks(range(0, max_time + 1))
+            ax.set_xlim(0, max_time)
+        ax.set_xlabel("Tiempo")
+        ax.set_ylabel("Procesos")
+        ax.set_title(f"Diagrama de Gantt - {algo}")
+        ax.grid(True, axis='x', linestyle='--', alpha=0.6)
+
+        canvas = FigureCanvasTkAgg(fig, master=self.frame_gantt)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+
+    def _salir(self):
+        self.master.destroy()
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\data_input_screen.py
+
+...-------------------...
+import customtkinter as ctk
+from tkinter import messagebox
+
+class DataInputScreen(ctk.CTkFrame):
+    def __init__(self, master, nombres_procesos, on_continue):
+        super().__init__(master)
+        self.nombres_procesos = nombres_procesos
+        self.on_continue = on_continue
+
+        self.entries_ta = []
+        self.entries_cpu1 = []
+        self.entries_bloq = []
+        self.entries_cpu2 = []
+        self.check_vars = []  # Estado de cada checkbox
+
+        self.label_title = ctk.CTkLabel(self, text="Ingresar datos de procesos", font=("Arial", 18, "bold"))
+        self.label_title.pack(pady=20)
+
+        self.form_frame = ctk.CTkFrame(self)
+        self.form_frame.pack(padx=10, pady=10, fill="both", expand=True)
+
+        self._build_rows()
+
+        self.btn_continue = ctk.CTkButton(self, text="Continuar", command=self._continue_clicked)
+        self.btn_continue.pack(pady=20)
+
+    def _build_rows(self):
+        for nombre in self.nombres_procesos:
+            row = ctk.CTkFrame(self.form_frame)
+            row.pack(pady=5, fill="x")
+
+            ctk.CTkLabel(row, text=nombre, width=80).pack(side="left", padx=5)
+
+            ta = ctk.CTkEntry(row, placeholder_text="Llegada", width=60)
+            ta.pack(side="left", padx=5)
+            self.entries_ta.append(ta)
+
+            cpu1 = ctk.CTkEntry(row, placeholder_text="CPU1", width=60)
+            cpu1.pack(side="left", padx=5)
+            self.entries_cpu1.append(cpu1)
+
+            var = ctk.BooleanVar(value=False)
+            chk = ctk.CTkCheckBox(row, text="Tiene bloqueo", variable=var,
+                                  command=lambda v=var, r=row: self._toggle_block_fields(v, r))
+            chk.pack(side="left", padx=5)
+            self.check_vars.append(var)
+
+            # Campos de bloqueo ocultos por defecto
+            bloq = ctk.CTkEntry(row, placeholder_text="Bloqueo (E/S)", width=80)
+            cpu2 = ctk.CTkEntry(row, placeholder_text="CPU2", width=60)
+            self.entries_bloq.append(bloq)
+            self.entries_cpu2.append(cpu2)
+
+    def _toggle_block_fields(self, var, row):
+        idx = self.check_vars.index(var)
+        bloq = self.entries_bloq[idx]
+        cpu2 = self.entries_cpu2[idx]
+        if var.get():
+            bloq.pack(side="left", padx=5)
+            cpu2.pack(side="left", padx=5)
+        else:
+            bloq.pack_forget()
+            cpu2.pack_forget()
+            bloq.delete(0, "end")
+            cpu2.delete(0, "end")
+
+    def _continue_clicked(self):
+        procesos_data = []
+        try:
+            for i, nombre in enumerate(self.nombres_procesos):
+                ta_str = self.entries_ta[i].get().strip()
+                cpu1_str = self.entries_cpu1[i].get().strip()
+
+                if not ta_str or not cpu1_str:
+                    raise ValueError
+
+                ta = int(ta_str)
+                cpu1 = int(cpu1_str)
+                if ta < 0 or cpu1 <= 0:
+                    raise ValueError
+
+                bursts = [cpu1]
+
+                if self.check_vars[i].get():
+                    bloq_str = self.entries_bloq[i].get().strip()
+                    cpu2_str = self.entries_cpu2[i].get().strip()
+                    if not bloq_str or not cpu2_str:
+                        raise ValueError
+                    bloq = int(bloq_str)
+                    cpu2 = int(cpu2_str)
+                    if bloq < 0 or cpu2 <= 0:
+                        raise ValueError
+                    bursts.extend([bloq, cpu2])
+
+                procesos_data.append({"pid": nombre, "arrival_time": ta, "bursts": bursts})
+
+        except ValueError:
+            messagebox.showerror(
+                "Error",
+                "Verifique que:\n- Llegada ≥ 0\n- CPU1 > 0\n- Si marca bloqueo, complete Bloqueo y CPU2\n- Todos los valores sean enteros."
+            )
+            return
+
+        self.on_continue(procesos_data)
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\name_input_screen.py
+
+...-------------------...
+# gui/name_input_screen.py
+
+import customtkinter as ctk
+from tkinter import messagebox
+
+class NameInputScreen(ctk.CTkFrame):
+    def __init__(self, master, cantidad_procesos, on_continue):
+        """
+        Pantalla para ingresar los nombres de los procesos.
+
+        :param master: ventana o frame padre
+        :param cantidad_procesos: número de procesos a crear
+        :param on_continue: función que recibe la lista de nombres y avanza a la siguiente pantalla
+        """
+        super().__init__(master)
+        self.cantidad_procesos = cantidad_procesos
+        self.on_continue = on_continue
+        self.entries = []
+
+        # Título
+        self.label_title = ctk.CTkLabel(self, text="Asignar nombres a los procesos", font=("Arial", 18, "bold"))
+        self.label_title.pack(pady=20)
+
+        # Campos dinámicos
+        for i in range(cantidad_procesos):
+            frame = ctk.CTkFrame(self)
+            frame.pack(pady=5, padx=10, fill="x")
+
+            label = ctk.CTkLabel(frame, text=f"Proceso {i+1}:")
+            label.pack(side="left", padx=5)
+
+            entry = ctk.CTkEntry(frame, placeholder_text=f"P{i+1}")
+            entry.pack(side="left", padx=5, fill="x", expand=True)
+            self.entries.append(entry)
+
+        # Botón continuar
+        self.btn_continue = ctk.CTkButton(self, text="Continuar", command=self._continue_clicked)
+        self.btn_continue.pack(pady=20)
+
+    def _continue_clicked(self):
+        """Valida y envía la lista de nombres."""
+        nombres = []
+        for i, entry in enumerate(self.entries):
+            nombre = entry.get().strip()
+            if not nombre:
+                nombre = f"P{i+1}"  # Si está vacío, asigna nombre por defecto
+            nombres.append(nombre)
+
+        # Validar que no haya nombres repetidos
+        if len(nombres) != len(set(nombres)):
+            messagebox.showerror("Error", "Los nombres de los procesos deben ser únicos.")
+            return
+
+        self.on_continue(nombres)
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\start_screen.py
+
+...-------------------...
+import customtkinter as ctk
+from tkinter import messagebox
+
+class StartScreen(ctk.CTkFrame):
+    def __init__(self, master, on_continue):
+        """
+        Pantalla inicial para ingresar la cantidad de procesos.
+
+        :param master: ventana o frame padre
+        :param on_continue: función que recibe la cantidad de procesos y avanza a la siguiente pantalla
+        """
+        super().__init__(master)
+        self.on_continue = on_continue
+
+        # Título
+        self.label_title = ctk.CTkLabel(self, text="Planificación de CPU", font=("Arial", 20, "bold"))
+        self.label_title.pack(pady=20)
+
+        # Instrucción
+        self.label_instruction = ctk.CTkLabel(self, text="Ingrese la cantidad de procesos:")
+        self.label_instruction.pack(pady=10)
+
+        # Campo de entrada
+        self.entry_count = ctk.CTkEntry(self, placeholder_text="Ej: 4")
+        self.entry_count.pack(pady=10)
+
+        # Botón continuar
+        self.btn_continue = ctk.CTkButton(self, text="Continuar", command=self._continue_clicked)
+        self.btn_continue.pack(pady=20)
+
+    def _continue_clicked(self):
+        """Valida la entrada y llama a la función on_continue."""
+        try:
+            n = int(self.entry_count.get())
+            if n <= 0:
+                raise ValueError
+            self.on_continue(n)
+        except ValueError:
+            messagebox.showerror("Error", "Ingrese un número válido mayor a 0")
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\__init__.py
+
+...-------------------...
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\models\process.py
+
+...-------------------...
+class Process:
+    def __init__(self, pid, arrival_time, bursts):
+        """
+        Representa un proceso con ráfagas de CPU y bloqueos (E/S).
+
+        :param pid: Identificador del proceso (str o int)
+        :param arrival_time: Tiempo de llegada inicial al sistema
+        :param bursts: Lista de enteros, índices pares = CPU, impares = bloqueo
+                       Ej: [3, 2, 5] => CPU 3, Bloqueo 2, CPU 5
+        """
+        self.pid = pid
+        self.arrival_time = arrival_time
+        self.bursts = bursts[:]  # copia para no modificar la original
+        self.current_burst_index = 0
+        self.remaining_time = bursts[0] if bursts else 0
+
+        # Métricas
+        self.start_time = None
+        self.completion_time = None
+        self.turnaround_time = None  # TR
+        self.waiting_time = None     # TE
+
+    def is_cpu_burst(self):
+        """True si la ráfaga actual es de CPU."""
+        return self.current_burst_index % 2 == 0
+
+    def advance_burst(self):
+        """Avanza a la siguiente ráfaga."""
+        self.current_burst_index += 1
+        if self.current_burst_index < len(self.bursts):
+            self.remaining_time = self.bursts[self.current_burst_index]
+        else:
+            self.remaining_time = 0
+
+    def calculate_metrics(self):
+        """
+        Calcula TR (turnaround time) y TE (waiting time).
+        TR = completion_time - arrival_time
+        TE = TR - tiempo total de CPU - tiempo total de bloqueos
+        """
+        if self.completion_time is None:
+            raise ValueError(f"No se puede calcular métricas: {self.pid} no tiene completion_time asignado.")
+
+        # Tiempo total en el sistema
+        self.turnaround_time = self.completion_time - self.arrival_time
+
+        # Suma de todas las ráfagas de CPU (índices pares)
+        total_cpu = sum(self.bursts[i] for i in range(0, len(self.bursts), 2))
+
+        # Suma de todas las ráfagas de bloqueo/E/S (índices impares)
+        total_bloq = sum(self.bursts[i] for i in range(1, len(self.bursts), 2))
+
+        # Tiempo de espera real en cola de listos
+        self.waiting_time = self.turnaround_time - total_cpu - total_bloq
+
+    def __repr__(self):
+        return (f"Process(pid={self.pid}, arrival={self.arrival_time}, bursts={self.bursts}, "
+                f"start={self.start_time}, completion={self.completion_time}, "
+                f"TR={self.turnaround_time}, TE={self.waiting_time})")
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\models\__init__.py
+
+...-------------------...
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\gantt.py
+
+...-------------------...
+# utils/gantt.py
+
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
+def plot_gantt(gantt_chart, title="Diagrama de Gantt"):
+    """
+    Genera un diagrama de Gantt con cada proceso en su propia fila.
+
+    :param gantt_chart: lista de tuplas (pid, start, end)
+                        Ej: [("P1", 0, 5), ("P2", 5, 8), ("IDLE", 8, 10)]
+    :param title: título del gráfico
+    """
+    # Obtener lista única de procesos (excluyendo IDLE)
+    procesos_unicos = [pid for pid, _, _ in gantt_chart if pid != "IDLE"]
+    procesos_unicos = list(dict.fromkeys(procesos_unicos))  # Mantener orden
+
+    # Asignar un índice Y a cada proceso
+    y_positions = {pid: i for i, pid in enumerate(procesos_unicos)}
+
+    # Colores
+    colors = {}
+    color_palette = plt.cm.get_cmap("tab20", len(procesos_unicos) + 1)
+
+    fig, ax = plt.subplots(figsize=(10, len(procesos_unicos) * 0.8))
+
+    for i, (pid, start, end) in enumerate(gantt_chart):
+        if pid not in colors:
+            if pid == "IDLE":
+                colors[pid] = "lightgray"
+            else:
+                colors[pid] = color_palette(len(colors))
+
+        # Si es IDLE, lo ponemos en una fila especial o en la fila del proceso anterior
+        y = y_positions.get(pid, -1)  # -1 si es IDLE
+
+        ax.barh(y, end - start, left=start, height=0.5,
+                align='center', color=colors[pid], edgecolor='black')
+
+        # Etiqueta centrada
+        ax.text((start + end) / 2, y, pid,
+                ha='center', va='center', color='black', fontsize=9)
+
+    # Configuración del eje Y
+    ax.set_yticks(list(y_positions.values()))
+    ax.set_yticklabels(list(y_positions.keys()))
+
+    # Configuración del eje X: mostrar todos los ticks
+    max_time = max(end for _, _, end in gantt_chart)
+    ax.set_xticks(range(0, max_time + 1))
+    ax.set_xlim(0, max_time)
+
+    # Cuadrícula
+    ax.grid(True, axis='x', linestyle='--', alpha=0.6)
+
+    # Etiquetas y título
+    ax.set_xlabel("Tiempo")
+    ax.set_ylabel("Procesos")
+    ax.set_title(title)
+
+    # Leyenda
+    legend_patches = [mpatches.Patch(color=col, label=pid) for pid, col in colors.items()]
+    ax.legend(handles=legend_patches, bbox_to_anchor=(1.05, 1), loc='upper left')
+
+    plt.tight_layout()
+    plt.show()
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\input_handler.py
+
+...-------------------...
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\metricas.py
+
+...-------------------...
+def calcular_metricas(procesos):
+    lista_metricas = []
+    total_tr = 0
+    total_te = 0
+
+    for p in procesos:
+        # Asegurarnos de que las métricas estén calculadas
+        if p.turnaround_time is None or p.waiting_time is None:
+            p.calculate_metrics()
+
+        # Usar bursts_original si existe, si no, usar bursts actual
+        bursts_fuente = getattr(p, "bursts_original", p.bursts)
+
+        # Suma de todas las ráfagas de CPU (índices pares)
+        total_cpu = sum(bursts_fuente[i] for i in range(0, len(bursts_fuente), 2))
+
+        lista_metricas.append({
+            "PID": p.pid,
+            "Llegada": p.arrival_time,
+            "CPU": total_cpu,
+            "Finalización": p.completion_time,
+            "TR": p.turnaround_time,
+            "TE": p.waiting_time
+        })
+
+        total_tr += p.turnaround_time
+        total_te += p.waiting_time
+
+    trm = total_tr / len(procesos) if procesos else 0
+    tem = total_te / len(procesos) if procesos else 0
+
+    return lista_metricas, trm, tem
+
+
+
+def imprimir_tabla_metricas(metricas, trm, tem):
+    """
+    Imprime la tabla de métricas en consola.
+    """
+    print(f"{'PID':<6}{'Llegada':<10}{'CPU':<8}{'Finalización':<14}{'TR':<8}{'TE':<8}")
+    for m in metricas:
+        print(f"{m['PID']:<6}{m['Llegada']:<10}{m['CPU']:<8}{m['Finalización']:<14}{m['TR']:<8}{m['TE']:<8}")
+    print("\n📈 Promedios:")
+    print(f"TRM (Tiempo de Respuesta Medio): {trm:.2f}")
+    print(f"TEM (Tiempo de Espera Medio): {tem:.2f}")
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\parsers.py
+
+...-------------------...
+# utils/parsers.py
+
+def parse_bursts(input_str):
+    """
+    Convierte una cadena como '3,(2),5' en [3, 2, 5].
+    Los números entre paréntesis se interpretan como bloqueos (E/S).
+    """
+    bursts = []
+    # Eliminamos espacios y separamos por comas
+    parts = input_str.replace(" ", "").split(",")
+    for part in parts:
+        if part.startswith("(") and part.endswith(")"):
+            # Bloqueo
+            val = int(part.strip("()"))
+            bursts.append(val)
+        else:
+            # CPU
+            bursts.append(int(part))
+    return bursts
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\__init__.py
+
+...-------------------...
+
+
+...-------------------...
