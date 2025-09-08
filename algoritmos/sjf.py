@@ -2,58 +2,42 @@ from copy import deepcopy
 
 def sjf(process_list):
     """
-    Simula la planificación SJF (Shortest Job First, no expropiativo).
-
-    :param process_list: lista de objetos Process
-    :return: (gantt_chart, procesos_con_metricas)
+    SJF no expulsivo sin bloqueos.
+    Usa Process con bursts=[CPU] y remaining_time inicializado.
+    Devuelve gantt en 3-tuplas: (pid, start, end).
     """
     processes = deepcopy(process_list)
-    n = len(processes)
-    completed = 0
     time = 0
-    gantt_chart = []
-    ready_queue = []
+    gantt = []
+    completed = 0
+    n = len(processes)
 
-    # Para evitar reprocesar, marcamos procesos completados
-    procesos_pendientes = processes[:]
+    # Para evitar reuso accidental
+    for p in processes:
+        # remaining_time ya viene de Process(bursts=[cpu])
+        pass
 
     while completed < n:
-        # Agregar a la cola de listos los procesos que ya llegaron
-        for p in procesos_pendientes:
-            if p.arrival_time <= time and p not in ready_queue:
-                ready_queue.append(p)
+        # Elegibles: llegaron y no completados
+        elegibles = [p for p in processes if p.arrival_time <= time and p.completion_time is None]
 
-        # Filtrar solo los que no han terminado
-        ready_queue = [p for p in ready_queue if p.completion_time is None]
+        if not elegibles:
+            time += 1
+            continue
 
-        if ready_queue:
-            # Elegir el de menor burst_time
-            ready_queue.sort(key=lambda x: x.burst_time)
-            current = ready_queue.pop(0)
+        # Elegir el de menor remaining_time (única ráfaga de CPU)
+        current = min(elegibles, key=lambda p: p.remaining_time)
 
-            # Si el CPU estaba ocioso antes de este proceso
-            if time < current.arrival_time:
-                gantt_chart.append(("IDLE", time, current.arrival_time))
-                time = current.arrival_time
-
-            # Asignar start_time
+        if current.start_time is None:
             current.start_time = time
 
-            # Ejecutar el proceso
-            start = time
-            end = time + current.burst_time
-            gantt_chart.append((current.pid, start, end))
+        start = time
+        cpu = current.remaining_time
+        time += cpu
+        gantt.append((current.pid, start, time))
 
-            # Actualizar tiempos
-            time = end
-            current.completion_time = end
-            current.calculate_metrics()
+        current.completion_time = time
+        current.calculate_metrics()
+        completed += 1
 
-            completed += 1
-        else:
-            # No hay procesos listos → CPU ociosa
-            next_arrival = min(p.arrival_time for p in procesos_pendientes if p.completion_time is None)
-            gantt_chart.append(("IDLE", time, next_arrival))
-            time = next_arrival
-
-    return gantt_chart, processes
+    return gantt, processes

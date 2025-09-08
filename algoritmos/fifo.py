@@ -2,37 +2,41 @@ from copy import deepcopy
 
 def fifo(process_list):
     """
-    Simula la planificación FIFO (First In First Out).
-
-    :param process_list: lista de objetos Process
-    :return: (gantt_chart, procesos_con_metricas)
+    FIFO no expulsivo sin bloqueos.
+    Usa Process con bursts=[CPU] y remaining_time inicializado.
+    Devuelve gantt en 3-tuplas: (pid, start, end).
     """
-    # Trabajamos sobre una copia para no modificar la lista original
     processes = deepcopy(process_list)
+    time = 0
+    gantt = []
+    ready = []
+    completed = 0
+    n = len(processes)
 
-    # Ordenar por tiempo de llegada
+    # ordenar por llegada para consistencia (no obligatorio)
     processes.sort(key=lambda p: p.arrival_time)
 
-    time = 0
-    gantt_chart = []
+    while completed < n:
+        # Encolar llegadas al tiempo actual
+        for p in processes:
+            if p.start_time is None and p.arrival_time <= time and p not in ready and p.completion_time is None:
+                ready.append(p)
 
-    for process in processes:
-        # Si el CPU está ocioso antes de que llegue el proceso
-        if time < process.arrival_time:
-            gantt_chart.append(("IDLE", time, process.arrival_time))
-            time = process.arrival_time
+        if ready:
+            current = ready.pop(0)
+            if current.start_time is None:
+                current.start_time = time
 
-        # Asignar start_time si no lo tenía
-        process.start_time = time
+            start = time
+            cpu = current.remaining_time  # equivale a bursts[0]
+            time += cpu
+            gantt.append((current.pid, start, time))
 
-        # Ejecutar el proceso
-        start = time
-        end = time + process.burst_time
-        gantt_chart.append((process.pid, start, end))
+            current.completion_time = time
+            current.calculate_metrics()
+            completed += 1
+        else:
+            # No hay listos: avanzar 1 y reintentar
+            time += 1
 
-        # Actualizar tiempos
-        time = end
-        process.completion_time = end
-        process.calculate_metrics()
-
-    return gantt_chart, processes
+    return gantt, processes
