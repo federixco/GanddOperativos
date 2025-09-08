@@ -22,8 +22,12 @@ def srtf(process_list):
         ready_queue = [p for p in processes if p.arrival_time <= time and p.remaining_time > 0]
 
         if ready_queue:
-            # Elegir el de menor tiempo restante
-            ready_queue.sort(key=lambda x: x.remaining_time)
+            # Elegir el de menor tiempo restante, con desempate por FIFO
+            ready_queue.sort(key=lambda x: (
+                x.remaining_time,  # SRTF: menor tiempo restante
+                x.arrival_time,    # FIFO en empates
+                x.pid             # estabilidad
+            ))
             current = ready_queue[0]
 
             # Si cambia el proceso en ejecución, cerramos el bloque anterior

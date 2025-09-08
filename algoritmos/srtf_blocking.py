@@ -74,10 +74,15 @@ def srtf_blocking(process_list):
                             bp.advance_burst()
                             ready_queue.append(bp)
 
-        # 3) Selección SRTF por CPU total restante
+        # 3) Selección SRTF por CPU total restante, con desempate por FIFO
         eligibles = [p for p in ready_queue if p.is_cpu_burst()]
         if eligibles:
-            candidate = min(eligibles, key=total_cpu_restante)
+            eligibles.sort(key=lambda x: (
+                total_cpu_restante(x),  # SRTF: menor CPU total restante
+                x.arrival_time,         # FIFO en empates
+                x.pid                  # estabilidad
+            ))
+            candidate = eligibles[0]
             if current is not candidate:
                 if current is not None:
                     gantt_chart.append((current.pid, start_time, time, "CPU"))
