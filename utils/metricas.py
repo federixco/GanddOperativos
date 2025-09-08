@@ -8,8 +8,11 @@ def calcular_metricas(procesos):
         if p.turnaround_time is None or p.waiting_time is None:
             p.calculate_metrics()
 
+        # Usar bursts_original si existe, si no, usar bursts actual
+        bursts_fuente = getattr(p, "bursts_original", p.bursts)
+
         # Suma de todas las ráfagas de CPU (índices pares)
-        total_cpu = sum(p.bursts[i] for i in range(0, len(p.bursts), 2))
+        total_cpu = sum(bursts_fuente[i] for i in range(0, len(bursts_fuente), 2))
 
         lista_metricas.append({
             "PID": p.pid,
@@ -27,6 +30,7 @@ def calcular_metricas(procesos):
     tem = total_te / len(procesos) if procesos else 0
 
     return lista_metricas, trm, tem
+
 
 
 def imprimir_tabla_metricas(metricas, trm, tem):
