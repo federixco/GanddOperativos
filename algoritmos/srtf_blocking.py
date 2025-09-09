@@ -53,7 +53,8 @@ def srtf_blocking(process_list):
                         p.advance_burst()
                         ready_queue.append(p)
 
-        # 2) Desbloqueos
+        # 2) Desbloqueos - almacenar para agregar después de los procesos que terminan ejecución
+        procesos_desbloqueados = []
         for (bp, unblock_time) in blocked_queue[:]:
             if unblock_time == time:
                 blocked_queue.remove((bp, unblock_time))
@@ -64,7 +65,7 @@ def srtf_blocking(process_list):
                     completed += 1
                 else:
                     if bp.is_cpu_burst():
-                        ready_queue.append(bp)
+                        procesos_desbloqueados.append(bp)
                     else:
                         dur2 = bp.bursts[bp.current_burst_index]
                         if dur2 > 0:
@@ -72,10 +73,10 @@ def srtf_blocking(process_list):
                             blocked_queue.append((bp, time + dur2))
                         else:
                             bp.advance_burst()
-                            ready_queue.append(bp)
+                            procesos_desbloqueados.append(bp)
 
         # 3) Selección SRTF por CPU total restante, con desempate por FIFO
-        eligibles = [p for p in ready_queue if p.is_cpu_burst()]
+        eligibles = [p for p in ready_queue if p.is_cpu_burst() and p.completion_time is None]
         if eligibles:
             eligibles.sort(key=lambda x: (
                 total_cpu_restante(x),  # SRTF: menor CPU total restante
@@ -124,6 +125,11 @@ def srtf_blocking(process_list):
                         current.advance_burst()
                         ready_queue.append(current)
                     current = None
+
+        # 6) Agregar procesos desbloqueados al final de la cola después de procesar la ejecución
+        # Esto asegura que los procesos que terminan ejecución van antes que los que se desbloquean
+        for p in procesos_desbloqueados:
+            ready_queue.append(p)
 
     # Cierre por seguridad
     if current is not None:

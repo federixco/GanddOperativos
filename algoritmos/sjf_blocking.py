@@ -63,7 +63,8 @@ def sjf_blocking(process_list):
     enqueue_arrivals_leq_t(time)
 
     while completed < n:
-        # 1) Procesar TODOS los desbloqueos que vencieron hasta t
+        # 1) Procesar TODOS los desbloqueos que vencieron hasta t - almacenar para agregar después
+        procesos_desbloqueados = []
         if blocked:
             blocked.sort(key=lambda x: x[1])
         for (bp, unb) in blocked[:]:
@@ -75,7 +76,7 @@ def sjf_blocking(process_list):
                     continue
                 if bp.is_cpu_burst():
                     bp.ready_since = time
-                    ready.append(bp)
+                    procesos_desbloqueados.append(bp)
                 else:
                     dur = bp.bursts[bp.current_burst_index]
                     if dur > 0:
@@ -87,7 +88,7 @@ def sjf_blocking(process_list):
                             completed += 1
                         elif bp.is_cpu_burst():
                             bp.ready_since = time
-                            ready.append(bp)
+                            procesos_desbloqueados.append(bp)
 
         # 2) Encolar llegadas que hayan llegado hasta este momento
         enqueue_arrivals_leq_t(time)
@@ -101,7 +102,7 @@ def sjf_blocking(process_list):
             next_event = min(future_arrivals + future_unblocks) if (future_arrivals or future_unblocks) else None
             if next_event is None:
                 time += 1
-            elif next_event > time:
+            elif next_event is not None and next_event > time:
                 gantt.append(("IDLE", time, next_event, "IDLE"))
                 time = next_event
             else:
@@ -109,7 +110,7 @@ def sjf_blocking(process_list):
             continue
 
         # 4) Selección SJF: elegir el proceso con la ráfaga de CPU actual más corta
-        ready = [p for p in ready if p.current_burst_index < len(p.bursts)]
+        ready = [p for p in ready if p.current_burst_index < len(p.bursts) and p.completion_time is None]
         ready.sort(key=lambda x: (
             x.bursts[x.current_burst_index],  # SJF: ráfaga actual de CPU más corta
             x.arrival_time,                   # FIFO en empates
@@ -162,5 +163,10 @@ def sjf_blocking(process_list):
                 elif current.is_cpu_burst():
                     current.ready_since = time
                     ready.append(current)
+
+        # 7) Agregar procesos desbloqueados al final de la cola después de procesar la ejecución
+        # Esto asegura que los procesos que terminan ejecución van antes que los que se desbloquean
+        for p in procesos_desbloqueados:
+            ready.append(p)
 
     return gantt, processes
