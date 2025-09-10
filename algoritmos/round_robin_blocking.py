@@ -126,7 +126,6 @@ def round_robin_blocking(process_list, quantum):
 
         # 5) CORRECCIÓN: Agregar procesos desbloqueados al final de la cola
         # después de que se haya procesado el cambio de quantum
-        # Esto asegura que los procesos que terminan ejecución van antes que los que se desbloquean
         if procesos_desbloqueados:
             procesos_desbloqueados.sort(key=lambda p: p.pid)
             for p in procesos_desbloqueados:

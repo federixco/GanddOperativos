@@ -46,8 +46,7 @@ def fifo_blocking(process_list):
                                 if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
                                     ready_queue.append(p)
 
-        # 2) Desbloqueos que vencen ahora - se almacenan para agregar después de los procesos que terminan ejecución
-        procesos_desbloqueados = []
+        # 2) Desbloqueos que vencen ahora
         for (bp, unblock_time) in blocked_queue[:]:
             if unblock_time == time:
                 blocked_queue.remove((bp, unblock_time))
@@ -57,7 +56,7 @@ def fifo_blocking(process_list):
                     completed += 1
                 else:
                     if bp.is_cpu_burst():
-                        procesos_desbloqueados.append(bp)
+                        ready_queue.append(bp)
                     else:
                         dur2 = bp.bursts[bp.current_burst_index]
                         if dur2 > 0:
@@ -69,7 +68,7 @@ def fifo_blocking(process_list):
                                 bp.completion_time = time
                                 completed += 1
                             elif bp.is_cpu_burst():
-                                procesos_desbloqueados.append(bp)
+                                ready_queue.append(bp)
 
         # 3) Selección FIFO
         if current is None and ready_queue:
@@ -119,12 +118,7 @@ def fifo_blocking(process_list):
                                 ready_queue.append(current)
                                 current = None
         else:
-            # No hay proceso ejecutando ni listo: avanzar tiempo "vacío" (no pintamos IDLE)
+            # No hay proceso ejecutando ni listo: avanzar tiempo “vacío” (no pintamos IDLE)
             time += 1
-
-        # 5) Agregar procesos desbloqueados al final de la cola después de procesar la ejecución
-        # Esto asegura que los procesos que terminan ejecución van antes que los que se desbloquean
-        for p in procesos_desbloqueados:
-            ready_queue.append(p)
 
     return gantt_chart, processes
