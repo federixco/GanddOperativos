@@ -1,4 +1,4 @@
-#NO TOCAR MAS YA FUNCIONA BIEN 
+# NO TOCAR MAS YA FUNCIONA BIEN 
 from copy import deepcopy
 
 def fifo_blocking(process_list):
@@ -13,6 +13,11 @@ def fifo_blocking(process_list):
     current = None
     start_time = None
 
+    # Buffers de encolado para respetar la prioridad:
+    # primero entran los que terminan CPU (CPU_FINISH), luego los que salen de BLOQ (UNBLOCK)
+    enq_cpu = []      # procesos que entran a ready por llegada o por terminar CPU
+    enq_unblock = []  # procesos que entran a ready por desbloqueo
+
     while completed < n:
         # 1) Llegadas
         for p in processes:
@@ -22,9 +27,11 @@ def fifo_blocking(process_list):
                 and p not in ready_queue
                 and all(bp is not p for bp, _ in blocked_queue)
                 and p is not current
+                and p not in enq_cpu  # evitar duplicado si llega y ya está en buffer
+                and p not in enq_unblock
             ):
                 if p.is_cpu_burst():
-                    ready_queue.append(p)
+                    enq_cpu.append(p)  # PRIORIDAD: llegan a ready como CPU_FINISH
                 else:
                     dur = p.bursts[p.current_burst_index]
                     if dur > 0:
@@ -36,7 +43,7 @@ def fifo_blocking(process_list):
                             p.completion_time = time
                             completed += 1
                         elif p.is_cpu_burst():
-                            ready_queue.append(p)
+                            enq_cpu.append(p)  # entra por CPU
                         else:
                             dur2 = p.bursts[p.current_burst_index]
                             if dur2 > 0:
@@ -45,7 +52,7 @@ def fifo_blocking(process_list):
                             else:
                                 p.advance_burst()
                                 if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
-                                    ready_queue.append(p)
+                                    enq_cpu.append(p)
 
         # 2) Desbloqueos que vencen ahora
         for (bp, unblock_time) in blocked_queue[:]:
@@ -57,7 +64,7 @@ def fifo_blocking(process_list):
                     completed += 1
                 else:
                     if bp.is_cpu_burst():
-                        ready_queue.append(bp)
+                        enq_unblock.append(bp)  # SALIDA DE BLOQ va detrás de CPU_FINISH
                     else:
                         dur2 = bp.bursts[bp.current_burst_index]
                         if dur2 > 0:
@@ -69,7 +76,14 @@ def fifo_blocking(process_list):
                                 bp.completion_time = time
                                 completed += 1
                             elif bp.is_cpu_burst():
-                                ready_queue.append(bp)
+                                enq_unblock.append(bp)
+
+        # Mezclar en ready con la prioridad requerida: primero enq_cpu, luego enq_unblock
+        if enq_cpu or enq_unblock:
+            ready_queue.extend(enq_cpu)
+            ready_queue.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
         # 3) Selección FIFO
         if current is None and ready_queue:
@@ -99,7 +113,8 @@ def fifo_blocking(process_list):
                 else:
                     # ¿Siguiente es CPU?
                     if current.is_cpu_burst():
-                        ready_queue.append(current)
+                        # Entra a ready como "CPU_FINISH" (prioridad sobre UNBLOCK si coincide el instante)
+                        enq_cpu.append(current)
                         current = None
                     else:
                         # Siguiente es BLOQUEO
@@ -116,8 +131,15 @@ def fifo_blocking(process_list):
                                 completed += 1
                                 current = None
                             elif current.is_cpu_burst():
-                                ready_queue.append(current)
+                                enq_cpu.append(current)
                                 current = None
+
+            # Tras terminar el tick, antes de próxima selección, volcamos buffers con prioridad
+            if enq_cpu or enq_unblock:
+                ready_queue.extend(enq_cpu)
+                ready_queue.extend(enq_unblock)
+                enq_cpu.clear()
+                enq_unblock.clear()
         else:
             # No hay proceso ejecutando ni listo: avanzar tiempo “vacío” (no pintamos IDLE)
             time += 1

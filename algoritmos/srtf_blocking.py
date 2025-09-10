@@ -32,6 +32,10 @@ def srtf_blocking(process_list):
     current = None
     start_time = None
 
+    # Buffers de encolado con prioridad
+    enq_cpu = []      # llegada o fin de CPU
+    enq_unblock = []  # fin de bloqueo
+
     while completed < n:
         # 1) Llegadas
         for p in processes:
@@ -41,9 +45,11 @@ def srtf_blocking(process_list):
                 and p not in ready_queue
                 and all(bp is not p for bp, _ in blocked_queue)
                 and p is not current
+                and p not in enq_cpu
+                and p not in enq_unblock
             ):
                 if p.is_cpu_burst():
-                    ready_queue.append(p)
+                    enq_cpu.append(p)
                 else:
                     dur = p.bursts[p.current_burst_index]
                     if dur > 0:
@@ -51,7 +57,8 @@ def srtf_blocking(process_list):
                         blocked_queue.append((p, time + dur))
                     else:
                         p.advance_burst()
-                        ready_queue.append(p)
+                        if p.is_cpu_burst():
+                            enq_cpu.append(p)
 
         # 2) Desbloqueos
         for (bp, unblock_time) in blocked_queue[:]:
@@ -64,7 +71,7 @@ def srtf_blocking(process_list):
                     completed += 1
                 else:
                     if bp.is_cpu_burst():
-                        ready_queue.append(bp)
+                        enq_unblock.append(bp)
                     else:
                         dur2 = bp.bursts[bp.current_burst_index]
                         if dur2 > 0:
@@ -72,7 +79,15 @@ def srtf_blocking(process_list):
                             blocked_queue.append((bp, time + dur2))
                         else:
                             bp.advance_burst()
-                            ready_queue.append(bp)
+                            if bp.is_cpu_burst():
+                                enq_unblock.append(bp)
+
+        # 2.1) Volcar buffers a ready con prioridad CPU_FINISH/llegada > UNBLOCK
+        if enq_cpu or enq_unblock:
+            ready_queue.extend(enq_cpu)
+            ready_queue.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
         # 3) Selección SRTF por CPU total restante, con desempate por FIFO
         eligibles = [p for p in ready_queue if p.is_cpu_burst()]
@@ -80,7 +95,7 @@ def srtf_blocking(process_list):
             eligibles.sort(key=lambda x: (
                 total_cpu_restante(x),  # SRTF: menor CPU total restante
                 x.arrival_time,         # FIFO en empates
-                x.pid                  # estabilidad
+                x.pid                   # estabilidad
             ))
             candidate = eligibles[0]
             if current is not candidate:
@@ -113,7 +128,7 @@ def srtf_blocking(process_list):
                 current = None
             else:
                 if current.is_cpu_burst():
-                    ready_queue.append(current)
+                    enq_cpu.append(current)
                     current = None
                 else:
                     dur = current.bursts[current.current_burst_index]
@@ -122,8 +137,16 @@ def srtf_blocking(process_list):
                         blocked_queue.append((current, time + dur))
                     else:
                         current.advance_burst()
-                        ready_queue.append(current)
+                        if current.is_cpu_burst():
+                            enq_cpu.append(current)
                     current = None
+
+        # 5.1) Volcar buffers a ready con prioridad
+        if enq_cpu or enq_unblock:
+            ready_queue.extend(enq_cpu)
+            ready_queue.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
     # Cierre por seguridad
     if current is not None:
