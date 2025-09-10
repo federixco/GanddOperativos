@@ -1,3 +1,4 @@
+#NO TOCAR MAS YA FUNCIONA BIEN 
 from copy import deepcopy
 
 def fifo_blocking(process_list):
