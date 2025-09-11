@@ -53,6 +53,46 @@ class Process:
         # Tiempo de espera real en cola de listos
         self.waiting_time = self.turnaround_time - total_cpu - total_bloq
 
+    def get_total_cpu_time(self):
+        """Retorna el tiempo total de CPU del proceso."""
+        return sum(self.bursts[i] for i in range(0, len(self.bursts), 2))
+    
+    def get_total_blocking_time(self):
+        """Retorna el tiempo total de bloqueo del proceso."""
+        return sum(self.bursts[i] for i in range(1, len(self.bursts), 2))
+    
+    def get_burst_count(self):
+        """Retorna el número total de ráfagas (CPU + bloqueos)."""
+        return len(self.bursts)
+    
+    def get_cpu_burst_count(self):
+        """Retorna el número de ráfagas de CPU."""
+        return len([i for i in range(0, len(self.bursts), 2)])
+    
+    def get_blocking_burst_count(self):
+        """Retorna el número de ráfagas de bloqueo."""
+        return len([i for i in range(1, len(self.bursts), 2)])
+    
+    def is_finished(self):
+        """True si el proceso ha terminado todas sus ráfagas."""
+        return self.current_burst_index >= len(self.bursts)
+    
+    def get_remaining_bursts(self):
+        """Retorna las ráfagas restantes del proceso."""
+        return self.bursts[self.current_burst_index:] if self.current_burst_index < len(self.bursts) else []
+    
+    def get_burst_sequence_description(self):
+        """Retorna una descripción legible de la secuencia de ráfagas."""
+        if not self.bursts:
+            return "Sin ráfagas"
+        
+        sequence = []
+        for i, duration in enumerate(self.bursts):
+            burst_type = "CPU" if i % 2 == 0 else "Bloqueo"
+            sequence.append(f"{burst_type}({duration})")
+        
+        return " → ".join(sequence)
+
     def __repr__(self):
         return (f"Process(pid={self.pid}, arrival={self.arrival_time}, bursts={self.bursts}, "
                 f"start={self.start_time}, completion={self.completion_time}, "

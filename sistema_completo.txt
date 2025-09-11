@@ -43,138 +43,6 @@ if __name__ == "__main__":
 
 
 ...-------------------...
-Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\gilada.py
-
-...-------------------...
-class Proceso:
-    def __init__(self, pid, arrival_time, bursts):
-        self.pid = pid
-        self.arrival_time = arrival_time
-        self.bursts = bursts[:]  # [CPU, IO, CPU, IO...]
-        self.bursts_original = bursts[:]
-        self.current_burst_index = 0
-        self.completion_time = None
-        self.start_time = None
-        self._seq = 0
-        self.remaining_time = sum(b for i, b in enumerate(bursts) if i % 2 == 0)
-
-    def is_cpu_burst(self):
-        return self.current_burst_index % 2 == 0
-
-    def advance_burst(self):
-        self.current_burst_index += 1
-
-def sjf_blocking(processes):
-    time = 0
-    gantt = []
-    ready = []
-    blocked = []
-    completed = 0
-    n = len(processes)
-
-    def collapse_zeros(p, t):
-        while p.current_burst_index < len(p.bursts) and p.bursts[p.current_burst_index] == 0:
-            p.advance_burst()
-        if p.current_burst_index >= len(p.bursts):
-            p.completion_time = t
-            return True
-        return False
-
-    while completed < n:
-        # desbloqueos
-        for (bp, unb) in blocked[:]:
-            if unb == time:
-                blocked.remove((bp, unb))
-                bp.advance_burst()
-                if collapse_zeros(bp, time):
-                    completed += 1
-                    continue
-                if bp.is_cpu_burst():
-                    ready.append(bp)
-                else:
-                    dur = bp.bursts[bp.current_burst_index]
-                    blocked.append((bp, time+dur))
-
-        # llegadas
-        for p in processes:
-            if p.arrival_time == time and p.completion_time is None and p not in ready and all(bp is not p for bp, _ in blocked):
-                if collapse_zeros(p, time):
-                    completed += 1
-                    continue
-                if p.is_cpu_burst():
-                    ready.append(p)
-                else:
-                    dur = p.bursts[p.current_burst_index]
-                    blocked.append((p, time+dur))
-
-        # si no hay listos
-        if not ready:
-            next_event = min(
-                [unb for _, unb in blocked] +
-                [p.arrival_time for p in processes if p.completion_time is None and p.arrival_time > time],
-                default=None
-            )
-            if next_event is None:
-                time += 1
-            elif next_event > time:
-                time = next_event
-            else:
-                time += 1
-            continue
-
-        # elegir más corto (FIFO en empates)
-        ready.sort(key=lambda x: (x.bursts[x.current_burst_index], x.arrival_time, x._seq))
-        current = ready.pop(0)
-        if current.start_time is None:
-            current.start_time = time
-
-        # ejecutar ráfaga completa
-        start = time
-        cpu_dur = current.bursts[current.current_burst_index]
-        time += cpu_dur
-        current.remaining_time -= cpu_dur
-        gantt.append((current.pid, start, time, "CPU"))
-
-        # avanzar
-        current.advance_burst()
-        if collapse_zeros(current, time):
-            completed += 1
-            continue
-        if current.is_cpu_burst():
-            ready.append(current)
-        else:
-            dur = current.bursts[current.current_burst_index]
-            blocked.append((current, time+dur))
-
-    return gantt
-
-# Datos del ejercicio
-datos = [
-    ("A", 0, [6, 2, 3]),
-    ("B", 0, [3, 3, 3]),
-    ("C", 1, [1, 2, 1]),
-    ("D", 1, [4, 3, 3]),
-    ("E", 3, [5, 1, 4]),
-    ("F", 3, [3, 2, 2]),
-    ("G", 4, [2, 1, 2]),
-    ("H", 5, [4, 4, 3]),
-    ("I", 6, [3])
-]
-
-procesos = []
-for idx, (pid, arr, bursts) in enumerate(datos):
-    p = Proceso(pid, arr, bursts)
-    p._seq = idx
-    procesos.append(p)
-
-gantt = sjf_blocking(procesos)
-
-# Mostrar solo el orden de CPU
-orden_cpu = [pid for pid, s, e, tipo in gantt if tipo == "CPU"]
-print("Orden de ejecución de CPU:", orden_cpu)
-
-
-...-------------------...
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\main.py
 
 ...-------------------...
@@ -279,6 +147,7 @@ def fifo(process_list):
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\fifo_blocking.py
 
 ...-------------------...
+# NO TOCAR MAS YA FUNCIONA BIEN 
 from copy import deepcopy
 
 def fifo_blocking(process_list):
@@ -293,6 +162,11 @@ def fifo_blocking(process_list):
     current = None
     start_time = None
 
+    # Buffers de encolado para respetar la prioridad:
+    # primero entran los que terminan CPU (CPU_FINISH), luego los que salen de BLOQ (UNBLOCK)
+    enq_cpu = []      # procesos que entran a ready por llegada o por terminar CPU
+    enq_unblock = []  # procesos que entran a ready por desbloqueo
+
     while completed < n:
         # 1) Llegadas
         for p in processes:
@@ -302,9 +176,11 @@ def fifo_blocking(process_list):
                 and p not in ready_queue
                 and all(bp is not p for bp, _ in blocked_queue)
                 and p is not current
+                and p not in enq_cpu  # evitar duplicado si llega y ya está en buffer
+                and p not in enq_unblock
             ):
                 if p.is_cpu_burst():
-                    ready_queue.append(p)
+                    enq_cpu.append(p)  # PRIORIDAD: llegan a ready como CPU_FINISH
                 else:
                     dur = p.bursts[p.current_burst_index]
                     if dur > 0:
@@ -316,7 +192,7 @@ def fifo_blocking(process_list):
                             p.completion_time = time
                             completed += 1
                         elif p.is_cpu_burst():
-                            ready_queue.append(p)
+                            enq_cpu.append(p)  # entra por CPU
                         else:
                             dur2 = p.bursts[p.current_burst_index]
                             if dur2 > 0:
@@ -325,7 +201,7 @@ def fifo_blocking(process_list):
                             else:
                                 p.advance_burst()
                                 if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
-                                    ready_queue.append(p)
+                                    enq_cpu.append(p)
 
         # 2) Desbloqueos que vencen ahora
         for (bp, unblock_time) in blocked_queue[:]:
@@ -337,7 +213,7 @@ def fifo_blocking(process_list):
                     completed += 1
                 else:
                     if bp.is_cpu_burst():
-                        ready_queue.append(bp)
+                        enq_unblock.append(bp)  # SALIDA DE BLOQ va detrás de CPU_FINISH
                     else:
                         dur2 = bp.bursts[bp.current_burst_index]
                         if dur2 > 0:
@@ -349,7 +225,14 @@ def fifo_blocking(process_list):
                                 bp.completion_time = time
                                 completed += 1
                             elif bp.is_cpu_burst():
-                                ready_queue.append(bp)
+                                enq_unblock.append(bp)
+
+        # Mezclar en ready con la prioridad requerida: primero enq_cpu, luego enq_unblock
+        if enq_cpu or enq_unblock:
+            ready_queue.extend(enq_cpu)
+            ready_queue.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
         # 3) Selección FIFO
         if current is None and ready_queue:
@@ -379,7 +262,8 @@ def fifo_blocking(process_list):
                 else:
                     # ¿Siguiente es CPU?
                     if current.is_cpu_burst():
-                        ready_queue.append(current)
+                        # Entra a ready como "CPU_FINISH" (prioridad sobre UNBLOCK si coincide el instante)
+                        enq_cpu.append(current)
                         current = None
                     else:
                         # Siguiente es BLOQUEO
@@ -396,8 +280,15 @@ def fifo_blocking(process_list):
                                 completed += 1
                                 current = None
                             elif current.is_cpu_burst():
-                                ready_queue.append(current)
+                                enq_cpu.append(current)
                                 current = None
+
+            # Tras terminar el tick, antes de próxima selección, volcamos buffers con prioridad
+            if enq_cpu or enq_unblock:
+                ready_queue.extend(enq_cpu)
+                ready_queue.extend(enq_unblock)
+                enq_cpu.clear()
+                enq_unblock.clear()
         else:
             # No hay proceso ejecutando ni listo: avanzar tiempo “vacío” (no pintamos IDLE)
             time += 1
@@ -420,16 +311,24 @@ def round_robin(process_list, quantum):
     gantt_chart = []
 
     ready_queue = deque()
-    procesos_pendientes = sorted(processes, key=lambda p: p.arrival_time)
+    # Ordenar por tiempo de llegada, luego por PID para consistencia
+    procesos_pendientes = sorted(processes, key=lambda p: (p.arrival_time, p.pid))
 
     current_pid = None
     start_time = None
 
     while completed < n:
         # Agregar procesos que llegan en este instante
+        # Ordenar por PID para mantener consistencia
+        procesos_que_llegan = []
         for p in procesos_pendientes:
             if p.arrival_time == time and p not in ready_queue and p.remaining_time > 0:
-                ready_queue.append(p)
+                procesos_que_llegan.append(p)
+        
+        # Ordenar por PID y agregar al final de la cola
+        procesos_que_llegan.sort(key=lambda p: p.pid)
+        for p in procesos_que_llegan:
+            ready_queue.append(p)
 
         if ready_queue:
             current = ready_queue.popleft()
@@ -448,12 +347,19 @@ def round_robin(process_list, quantum):
             current.remaining_time -= exec_time
             time += exec_time
 
-            # Agregar procesos que llegaron mientras este ejecutaba
+            # Agregar procesos que llegaron durante la ejecución
+            procesos_nuevos = []
             for p in procesos_pendientes:
                 if time - exec_time < p.arrival_time <= time and p.remaining_time > 0 and p not in ready_queue:
-                    ready_queue.append(p)
+                    procesos_nuevos.append(p)
+            
+            # Ordenar por PID y agregar al final
+            procesos_nuevos.sort(key=lambda p: p.pid)
+            for p in procesos_nuevos:
+                ready_queue.append(p)
 
             if current.remaining_time > 0:
+                # Agregar el proceso actual al final si no terminó
                 ready_queue.append(current)
             else:
                 current.completion_time = time
@@ -483,113 +389,186 @@ from copy import deepcopy
 from collections import deque
 
 def round_robin_blocking(process_list, quantum):
+    """Round Robin con soporte para bloqueos, basado en FIFO que funciona bien."""
+    
+    def collapse_zeros(proc, t):
+        """Colapsa ráfagas de duración 0."""
+        while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
+            proc.advance_burst()
+        if proc.current_burst_index >= len(proc.bursts):
+            proc.completion_time = t
+            return True
+        return False
+
     processes = deepcopy(process_list)
+    
+    # Inicializar procesos
+    for idx, p in enumerate(processes):
+        if not hasattr(p, "bursts_original"):
+            p.bursts_original = p.bursts[:]
+        p._seq = idx
+        p.remaining_time = sum(b for i, b in enumerate(p.bursts) if i % 2 == 0)
+        p.ready_since = None
+        p.start_time = None
+        p.completion_time = None
+
     time = 0
-    gantt_chart = []
-    ready_queue = deque()
-    blocked_queue = []  # (proceso, unblock_time)
+    gantt = []
+    ready = deque()
+    blocked = []      # [(proc, unblock_time)]
     completed = 0
     n = len(processes)
+    arrived = set()   # PIDs ya encolados por llegada
+
+    # Buffers de encolado con prioridad
+    enq_cpu = []      # procesos que entran por llegada o fin de CPU
+    enq_unblock = []  # procesos que entran por fin de bloqueo
+
+    def enqueue_arrivals_leq_t(t):
+        nonlocal completed
+        for p in processes:
+            if p.pid in arrived:
+                continue
+            if p.arrival_time <= t and p.completion_time is None:
+                arrived.add(p.pid)
+                if collapse_zeros(p, t):
+                    completed += 1
+                    continue
+                if p.is_cpu_burst():
+                    p.ready_since = p.arrival_time
+                    enq_cpu.append(p)  # llegada → prioridad CPU_FINISH
+                else:
+                    dur = p.bursts[p.current_burst_index]
+                    if dur > 0:
+                        gantt.append((p.pid, t, t + dur, "BLOCK"))
+                        blocked.append((p, t + dur))
+                    else:
+                        p.advance_burst()
+                        if collapse_zeros(p, t):
+                            completed += 1
+                        elif p.is_cpu_burst():
+                            p.ready_since = p.arrival_time
+                            enq_cpu.append(p)
+
+    # Inicializar con todos los procesos que llegan en tiempo 0 o antes
+    enqueue_arrivals_leq_t(time)
+    if enq_cpu or enq_unblock:
+        ready.extend(enq_cpu)
+        ready.extend(enq_unblock)
+        enq_cpu.clear()
+        enq_unblock.clear()
 
     current = None
     start_time = None
     quantum_counter = 0
 
     while completed < n:
-        # 1) Llegadas
-        for p in processes:
-            if (
-                p.arrival_time == time
-                and p.completion_time is None
-                and p not in ready_queue
-                and all(bp is not p for bp, _ in blocked_queue)
-                and p is not current
-            ):
-                if p.is_cpu_burst():
-                    ready_queue.append(p)
-                else:
-                    dur = p.bursts[p.current_burst_index]
-                    if dur > 0:
-                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))
-                        blocked_queue.append((p, time + dur))
-                    else:
-                        p.advance_burst()
-                        if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
-                            ready_queue.append(p)
-
-        # 2) Desbloqueos
-        for (bp, unblock_time) in blocked_queue[:]:
-            if unblock_time == time:
-                blocked_queue.remove((bp, unblock_time))
+        # 1) Procesar TODOS los desbloqueos que vencieron hasta t
+        if blocked:
+            blocked.sort(key=lambda x: x[1])
+        for (bp, unb) in blocked[:]:
+            if unb <= time:
+                blocked.remove((bp, unb))
                 bp.advance_burst()
-                if bp.current_burst_index >= len(bp.bursts):
-                    bp.completion_time = time
+                if collapse_zeros(bp, time):
                     completed += 1
+                    continue
+                if bp.is_cpu_burst():
+                    bp.ready_since = time
+                    enq_unblock.append(bp)  # fin de BLOQ → va detrás de CPU_FINISH
                 else:
-                    if bp.is_cpu_burst():
-                        ready_queue.append(bp)
+                    dur = bp.bursts[bp.current_burst_index]
+                    if dur > 0:
+                        gantt.append((bp.pid, time, time + dur, "BLOCK"))
+                        blocked.append((bp, time + dur))
                     else:
-                        dur2 = bp.bursts[bp.current_burst_index]
-                        if dur2 > 0:
-                            gantt_chart.append((bp.pid, time, time + dur2, "BLOCK"))
-                            blocked_queue.append((bp, time + dur2))
-                        else:
-                            bp.advance_burst()
-                            if bp.current_burst_index < len(bp.bursts) and bp.is_cpu_burst():
-                                ready_queue.append(bp)
+                        bp.advance_burst()
+                        if collapse_zeros(bp, time):
+                            completed += 1
+                        elif bp.is_cpu_burst():
+                            bp.ready_since = time
+                            enq_unblock.append(bp)
 
-        # 3) Selección RR
-        if current is None and ready_queue:
-            current = ready_queue.popleft()
+        # 2) Encolar llegadas que hayan llegado hasta este momento
+        enqueue_arrivals_leq_t(time)
+
+        # 2.1) Volcar buffers a ready con prioridad CPU_FINISH > UNBLOCK
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
+
+        # 3) Si no hay listos, saltar al siguiente evento
+        if not ready:
+            future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived and p.completion_time is None]
+            future_unblocks = [unb for _, unb in blocked]
+            if not future_arrivals and not future_unblocks:
+                break
+            next_event = min(future_arrivals + future_unblocks) if (future_arrivals or future_unblocks) else None
+            if next_event is None:
+                time += 1
+            elif next_event > time:
+                gantt.append(("IDLE", time, next_event, "IDLE"))
+                time = next_event
+            else:
+                time += 1
+            continue
+
+        # 4) Selección Round Robin
+        if current is None:
+            current = ready.popleft()
             start_time = time
             quantum_counter = 0
             if current.start_time is None:
                 current.start_time = time
 
-        # 4) Ejecutar
-        if current:
-            current.remaining_time -= 1
-            quantum_counter += 1
-            time += 1
+        # 5) Ejecutar 1 unidad de tiempo
+        time += 1
+        current.remaining_time -= 1
+        quantum_counter += 1
 
-            # Si terminó ráfaga de CPU
+        # 6) Verificar si terminó la ráfaga o se agotó el quantum
+        if current.remaining_time == 0 or quantum_counter >= quantum:
+            gantt.append((current.pid, start_time, time, "CPU"))
+            
             if current.remaining_time == 0:
-                gantt_chart.append((current.pid, start_time, time, "CPU"))
+                # Terminó la ráfaga
                 current.advance_burst()
-                if current.current_burst_index >= len(current.bursts):
-                    current.completion_time = time
+                if collapse_zeros(current, time):
                     completed += 1
                     current = None
                 else:
                     if current.is_cpu_burst():
-                        ready_queue.append(current)
-                        current = None
+                        current.ready_since = time
+                        enq_cpu.append(current)
                     else:
                         dur = current.bursts[current.current_burst_index]
                         if dur > 0:
-                            gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
-                            blocked_queue.append((current, time + dur))
+                            gantt.append((current.pid, time, time + dur, "BLOCK"))
+                            blocked.append((current, time + dur))
                         else:
                             current.advance_burst()
-                            if current.current_burst_index < len(current.bursts) and current.is_cpu_burst():
-                                ready_queue.append(current)
-                        current = None
-
-            # Si se agotó el quantum pero no terminó CPU
-            elif quantum_counter >= quantum:
-                gantt_chart.append((current.pid, start_time, time, "CPU"))
-                ready_queue.append(current)
+                            if collapse_zeros(current, time):
+                                completed += 1
+                            elif current.is_cpu_burst():
+                                current.ready_since = time
+                                enq_cpu.append(current)
+                    current = None
+            else:
+                # Solo se agotó el quantum, volver a encolar
+                current.ready_since = time
+                enq_cpu.append(current)
                 current = None
 
-        else:
-            # Si no hay listos pero sí bloqueados, saltar al próximo desbloqueo
-            if blocked_queue:
-                next_unblock = min(unblock_time for _, unblock_time in blocked_queue)
-                time = max(time, next_unblock)
-            else:
-                time += 1
+        # 6.1) Volcar buffers a ready con prioridad
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
-    return gantt_chart, processes
+    return gantt, processes
 
 
 ...-------------------...
@@ -645,24 +624,32 @@ def sjf(process_list):
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\sjf_blocking.py
 
 ...-------------------...
-from copy import deepcopy
+﻿from copy import deepcopy
 
 def sjf_blocking(process_list):
     processes = deepcopy(process_list)
 
+    # Init por proceso
     for idx, p in enumerate(processes):
         if not hasattr(p, "bursts_original"):
             p.bursts_original = p.bursts[:]
         p._seq = idx
         p.remaining_time = sum(b for i, b in enumerate(p.bursts) if i % 2 == 0)
+        p.ready_since = None
+        p.start_time = None
+        p.completion_time = None
 
     time = 0
     gantt = []
     ready = []
-    blocked = []
+    blocked = []      # [(proc, unblock_time)]
     completed = 0
     n = len(processes)
-    arrived = set()
+    arrived = set()   # PIDs ya encolados por llegada
+
+    # Buffers de encolado con prioridad
+    enq_cpu = []      # procesos que entran por llegada o fin de CPU
+    enq_unblock = []  # procesos que entran por fin de bloqueo
 
     def collapse_zeros(proc, t):
         while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
@@ -672,7 +659,7 @@ def sjf_blocking(process_list):
             return True
         return False
 
-    def enqueue_arrivals(t):
+    def enqueue_arrivals_leq_t(t):
         nonlocal completed
         for p in processes:
             if p.pid in arrived:
@@ -683,76 +670,141 @@ def sjf_blocking(process_list):
                     completed += 1
                     continue
                 if p.is_cpu_burst():
-                    ready.append(p)
+                    p.ready_since = p.arrival_time
+                    enq_cpu.append(p)  # llegada → prioridad CPU_FINISH
                 else:
                     dur = p.bursts[p.current_burst_index]
-                    gantt.append((p.pid, t, t + dur, "BLOCK"))
-                    blocked.append((p, t + dur))
+                    if dur > 0:
+                        gantt.append((p.pid, t, t + dur, "BLOCK"))
+                        blocked.append((p, t + dur))
+                    else:
+                        p.advance_burst()
+                        if collapse_zeros(p, t):
+                            completed += 1
+                        elif p.is_cpu_burst():
+                            p.ready_since = p.arrival_time
+                            enq_cpu.append(p)
+
+    # Inicializar con todos los procesos que llegan en tiempo 0 o antes
+    enqueue_arrivals_leq_t(time)
+    if enq_cpu or enq_unblock:
+        ready.extend(enq_cpu)
+        ready.extend(enq_unblock)
+        enq_cpu.clear()
+        enq_unblock.clear()
 
     while completed < n:
-        # desbloqueos
+        # 1) Procesar TODOS los desbloqueos que vencieron hasta t
+        if blocked:
+            blocked.sort(key=lambda x: x[1])
         for (bp, unb) in blocked[:]:
-            if unb == time:
+            if unb <= time:
                 blocked.remove((bp, unb))
                 bp.advance_burst()
                 if collapse_zeros(bp, time):
                     completed += 1
                     continue
                 if bp.is_cpu_burst():
-                    ready.append(bp)
+                    bp.ready_since = time
+                    enq_unblock.append(bp)  # fin de BLOQ → va detrás de CPU_FINISH
                 else:
                     dur = bp.bursts[bp.current_burst_index]
-                    gantt.append((bp.pid, time, time + dur, "BLOCK"))
-                    blocked.append((bp, time + dur))
+                    if dur > 0:
+                        gantt.append((bp.pid, time, time + dur, "BLOCK"))
+                        blocked.append((bp, time + dur))
+                    else:
+                        bp.advance_burst()
+                        if collapse_zeros(bp, time):
+                            completed += 1
+                        elif bp.is_cpu_burst():
+                            bp.ready_since = time
+                            enq_unblock.append(bp)
 
-        # llegadas
-        enqueue_arrivals(time)
+        # 2) Encolar llegadas que hayan llegado hasta este momento
+        enqueue_arrivals_leq_t(time)
 
-        # si no hay listos
+        # 2.1) Volcar buffers a ready con prioridad CPU_FINISH > UNBLOCK
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
+
+        # 3) Si no hay listos, saltar al siguiente evento
         if not ready:
-            future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived]
+            future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived and p.completion_time is None]
             future_unblocks = [unb for _, unb in blocked]
             if not future_arrivals and not future_unblocks:
-                # nada más por hacer → romper
                 break
-            if future_arrivals or future_unblocks:
-                next_event = min(future_arrivals + future_unblocks)
-                if next_event > time:
-                    gantt.append(("IDLE", time, next_event, "IDLE"))
-                    time = next_event
-                else:
-                    time += 1
+            next_event = min(future_arrivals + future_unblocks) if (future_arrivals or future_unblocks) else None
+            if next_event is None:
+                time += 1
+            elif next_event > time:
+                gantt.append(("IDLE", time, next_event, "IDLE"))
+                time = next_event
             else:
                 time += 1
             continue
 
-        # elegir más corto (FIFO en empates)
-        ready.sort(key=lambda x: (x.bursts[x.current_burst_index], x.arrival_time, x._seq))
+        # 4) Selección SJF
+        ready = [p for p in ready if p.current_burst_index < len(p.bursts)]
+        ready.sort(key=lambda x: (
+            x.bursts[x.current_burst_index],  # ráfaga actual más corta
+            x.arrival_time,                   # FIFO en empates
+            x.pid
+        ))
+
         current = ready.pop(0)
         if current.start_time is None:
             current.start_time = time
 
-        # ejecutar ráfaga completa
+        # 5) Ejecutar ráfaga completa
         start = time
         cpu_dur = current.bursts[current.current_burst_index]
+        if cpu_dur <= 0:
+            if collapse_zeros(current, time):
+                completed += 1
+            else:
+                if current.is_cpu_burst():
+                    current.ready_since = time
+                    enq_cpu.append(current)
+            continue
+
         time += cpu_dur
-        current.remaining_time -= cpu_dur
+        if hasattr(current, "remaining_time") and current.remaining_time is not None:
+            current.remaining_time -= cpu_dur
+            if current.remaining_time < 0:
+                current.remaining_time = 0
         gantt.append((current.pid, start, time, "CPU"))
 
-        # avanzar
+        # 6) Avanzar bursts y re-encolar según corresponda
         current.advance_burst()
         if collapse_zeros(current, time):
             completed += 1
-            enqueue_arrivals(time)
             continue
+
         if current.is_cpu_burst():
-            ready.append(current)
+            current.ready_since = time
+            enq_cpu.append(current)
         else:
             dur = current.bursts[current.current_burst_index]
-            gantt.append((current.pid, time, time + dur, "BLOCK"))
-            blocked.append((current, time + dur))
+            if dur > 0:
+                gantt.append((current.pid, time, time + dur, "BLOCK"))
+                blocked.append((current, time + dur))
+            else:
+                current.advance_burst()
+                if collapse_zeros(current, time):
+                    completed += 1
+                elif current.is_cpu_burst():
+                    current.ready_since = time
+                    enq_cpu.append(current)
 
-        enqueue_arrivals(time)
+        # 6.1) Volcar buffers a ready con prioridad
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
     return gantt, processes
 
@@ -785,8 +837,12 @@ def srtf(process_list):
         ready_queue = [p for p in processes if p.arrival_time <= time and p.remaining_time > 0]
 
         if ready_queue:
-            # Elegir el de menor tiempo restante
-            ready_queue.sort(key=lambda x: x.remaining_time)
+            # Elegir el de menor tiempo restante, con desempate por FIFO
+            ready_queue.sort(key=lambda x: (
+                x.remaining_time,  # SRTF: menor tiempo restante
+                x.arrival_time,    # FIFO en empates
+                x.pid             # estabilidad
+            ))
             current = ready_queue[0]
 
             # Si cambia el proceso en ejecución, cerramos el bloque anterior
@@ -832,10 +888,7 @@ from copy import deepcopy
 def srtf_blocking(process_list):
     """
     SRTF expulsivo con soporte para procesos mixtos (con y sin bloqueos).
-    - Criterio: CPU total restante (CPU actual + futuras CPUs).
-    - arrival_time nunca se modifica.
-    - Bloqueos manejados con unblock_time (sin restar tick a tick).
-    - Gantt: (pid, start, end, tipo) con tipo en {"CPU","BLOCK"}.
+    Basado en el algoritmo SJF que funciona correctamente.
     """
 
     def total_cpu_restante(p):
@@ -850,110 +903,202 @@ def srtf_blocking(process_list):
             return total
         return float("inf")  # si está en bloqueo, no debería estar en ready
 
+    def collapse_zeros(proc, t):
+        """Colapsa ráfagas de duración 0."""
+        while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
+            proc.advance_burst()
+        if proc.current_burst_index >= len(proc.bursts):
+            proc.completion_time = t
+            return True
+        return False
+
     processes = deepcopy(process_list)
+    
+    # Inicializar procesos
+    for idx, p in enumerate(processes):
+        if not hasattr(p, "bursts_original"):
+            p.bursts_original = p.bursts[:]
+        p._seq = idx
+        p.remaining_time = sum(b for i, b in enumerate(p.bursts) if i % 2 == 0)
+        p.ready_since = None
+        p.start_time = None
+        p.completion_time = None
+
     time = 0
-    gantt_chart = []
-    ready_queue = []
-    blocked_queue = []  # (proceso, unblock_time)
+    gantt = []
+    ready = []
+    blocked = []      # [(proc, unblock_time)]
     completed = 0
     n = len(processes)
+    arrived = set()   # PIDs ya encolados por llegada
 
-    current = None
-    start_time = None
+    # Buffers de encolado con prioridad
+    enq_cpu = []      # procesos que entran por llegada o fin de CPU
+    enq_unblock = []  # procesos que entran por fin de bloqueo
 
-    while completed < n:
-        # 1) Llegadas
+    def enqueue_arrivals_leq_t(t):
+        nonlocal completed
         for p in processes:
-            if (
-                p.arrival_time == time
-                and p.completion_time is None
-                and p not in ready_queue
-                and all(bp is not p for bp, _ in blocked_queue)
-                and p is not current
-            ):
+            if p.pid in arrived:
+                continue
+            if p.arrival_time <= t and p.completion_time is None:
+                arrived.add(p.pid)
+                if collapse_zeros(p, t):
+                    completed += 1
+                    continue
                 if p.is_cpu_burst():
-                    ready_queue.append(p)
+                    p.ready_since = p.arrival_time
+                    enq_cpu.append(p)  # llegada → prioridad CPU_FINISH
                 else:
                     dur = p.bursts[p.current_burst_index]
                     if dur > 0:
-                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))
-                        blocked_queue.append((p, time + dur))
+                        gantt.append((p.pid, t, t + dur, "BLOCK"))
+                        blocked.append((p, t + dur))
                     else:
                         p.advance_burst()
-                        ready_queue.append(p)
+                        if collapse_zeros(p, t):
+                            completed += 1
+                        elif p.is_cpu_burst():
+                            p.ready_since = p.arrival_time
+                            enq_cpu.append(p)
 
-        # 2) Desbloqueos
-        for (bp, unblock_time) in blocked_queue[:]:
-            if unblock_time == time:
-                blocked_queue.remove((bp, unblock_time))
+    # Inicializar con todos los procesos que llegan en tiempo 0 o antes
+    enqueue_arrivals_leq_t(time)
+    if enq_cpu or enq_unblock:
+        ready.extend(enq_cpu)
+        ready.extend(enq_unblock)
+        enq_cpu.clear()
+        enq_unblock.clear()
+
+    while completed < n:
+        # 1) Procesar TODOS los desbloqueos que vencieron hasta t
+        if blocked:
+            blocked.sort(key=lambda x: x[1])
+        for (bp, unb) in blocked[:]:
+            if unb <= time:
+                blocked.remove((bp, unb))
                 bp.advance_burst()
-                if bp.current_burst_index >= len(bp.bursts):
-                    bp.completion_time = time
-                    bp.calculate_metrics()
+                if collapse_zeros(bp, time):
                     completed += 1
+                    continue
+                if bp.is_cpu_burst():
+                    bp.ready_since = time
+                    enq_unblock.append(bp)  # fin de BLOQ → va detrás de CPU_FINISH
                 else:
-                    if bp.is_cpu_burst():
-                        ready_queue.append(bp)
+                    dur = bp.bursts[bp.current_burst_index]
+                    if dur > 0:
+                        gantt.append((bp.pid, time, time + dur, "BLOCK"))
+                        blocked.append((bp, time + dur))
                     else:
-                        dur2 = bp.bursts[bp.current_burst_index]
-                        if dur2 > 0:
-                            gantt_chart.append((bp.pid, time, time + dur2, "BLOCK"))
-                            blocked_queue.append((bp, time + dur2))
-                        else:
-                            bp.advance_burst()
-                            ready_queue.append(bp)
+                        bp.advance_burst()
+                        if collapse_zeros(bp, time):
+                            completed += 1
+                        elif bp.is_cpu_burst():
+                            bp.ready_since = time
+                            enq_unblock.append(bp)
 
-        # 3) Selección SRTF por CPU total restante
-        eligibles = [p for p in ready_queue if p.is_cpu_burst()]
-        if eligibles:
-            candidate = min(eligibles, key=total_cpu_restante)
-            if current is not candidate:
-                if current is not None:
-                    gantt_chart.append((current.pid, start_time, time, "CPU"))
-                current = candidate
-                start_time = time
-                if current.start_time is None:
-                    current.start_time = time
-        else:
-            # No hay listos, avanzar tiempo
-            time += 1
+        # 2) Encolar llegadas que hayan llegado hasta este momento
+        enqueue_arrivals_leq_t(time)
+
+        # 2.1) Volcar buffers a ready con prioridad CPU_FINISH > UNBLOCK
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
+
+        # 3) Si no hay listos, saltar al siguiente evento
+        if not ready:
+            future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived and p.completion_time is None]
+            future_unblocks = [unb for _, unb in blocked]
+            if not future_arrivals and not future_unblocks:
+                break
+            next_event = min(future_arrivals + future_unblocks) if (future_arrivals or future_unblocks) else None
+            if next_event is None:
+                time += 1
+            elif next_event > time:
+                gantt.append(("IDLE", time, next_event, "IDLE"))
+                time = next_event
+            else:
+                time += 1
             continue
 
-        # 4) Ejecutar 1 unidad
-        current.remaining_time -= 1
-        time += 1
+        # 4) Selección SRTF - ejecutar solo 1 unidad de tiempo
+        ready = [p for p in ready if p.current_burst_index < len(p.bursts)]
+        ready.sort(key=lambda x: (
+            total_cpu_restante(x),  # SRTF: menor CPU total restante
+            x.arrival_time,         # FIFO en empates
+            x.pid                   # estabilidad
+        ))
 
-        # 5) ¿Terminó la ráfaga de CPU?
+        current = ready.pop(0)
+        if current.start_time is None:
+            current.start_time = time
+
+        # 5) Ejecutar hasta que termine la ráfaga o llegue un proceso con menor tiempo restante
+        start_time = time
+        
+        while current.remaining_time > 0:
+            # Verificar si hay un proceso con menor tiempo restante que llegó
+            time += 1
+            current.remaining_time -= 1
+            
+            # Verificar llegadas durante la ejecución
+            enqueue_arrivals_leq_t(time)
+            
+            # Si hay un proceso con menor tiempo restante, interrumpir
+            if enq_cpu or enq_unblock:
+                # Volcar buffers temporalmente para verificar
+                temp_ready = ready + enq_cpu + enq_unblock
+                temp_ready = [p for p in temp_ready if p.current_burst_index < len(p.bursts)]
+                temp_ready.sort(key=lambda x: (
+                    total_cpu_restante(x),
+                    x.arrival_time,
+                    x.pid
+                ))
+                
+                if temp_ready and total_cpu_restante(temp_ready[0]) < total_cpu_restante(current):
+                    # Hay un proceso con menor tiempo restante, interrumpir
+                    break
+        
+        # Registrar el segmento de CPU ejecutado
+        gantt.append((current.pid, start_time, time, "CPU"))
+
+        # 6) Verificar si terminó la ráfaga actual
         if current.remaining_time == 0:
-            gantt_chart.append((current.pid, start_time, time, "CPU"))
-            if current in ready_queue:
-                ready_queue.remove(current)
             current.advance_burst()
-
-            if current.current_burst_index >= len(current.bursts):
-                current.completion_time = time
-                current.calculate_metrics()
+            if collapse_zeros(current, time):
                 completed += 1
-                current = None
+                continue
+
+            if current.is_cpu_burst():
+                current.ready_since = time
+                enq_cpu.append(current)
             else:
-                if current.is_cpu_burst():
-                    ready_queue.append(current)
-                    current = None
+                dur = current.bursts[current.current_burst_index]
+                if dur > 0:
+                    gantt.append((current.pid, time, time + dur, "BLOCK"))
+                    blocked.append((current, time + dur))
                 else:
-                    dur = current.bursts[current.current_burst_index]
-                    if dur > 0:
-                        gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
-                        blocked_queue.append((current, time + dur))
-                    else:
-                        current.advance_burst()
-                        ready_queue.append(current)
-                    current = None
+                    current.advance_burst()
+                    if collapse_zeros(current, time):
+                        completed += 1
+                    elif current.is_cpu_burst():
+                        current.ready_since = time
+                        enq_cpu.append(current)
+        else:
+            # El proceso no terminó, volver a encolarlo
+            current.ready_since = time
+            enq_cpu.append(current)
 
-    # Cierre por seguridad
-    if current is not None:
-        gantt_chart.append((current.pid, start_time, time, "CPU"))
+        # 6.1) Volcar buffers a ready con prioridad
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
-    return gantt_chart, processes
+    return gantt, processes
 
 
 ...-------------------...
@@ -964,6 +1109,287 @@ Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\__init__
 
 ...-------------------...
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\algorithm_screen.py
+
+...-------------------...
+import customtkinter as ctk
+from tkinter import messagebox, ttk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.pyplot as plt
+
+from models.process import Process
+# Algoritmos sin bloqueos
+from algoritmos.fifo import fifo
+from algoritmos.sjf import sjf
+from algoritmos.srtf import srtf
+from algoritmos.roundrobin import round_robin
+# Algoritmos con bloqueos
+from algoritmos.fifo_blocking import fifo_blocking
+from algoritmos.sjf_blocking import sjf_blocking
+from algoritmos.srtf_blocking import srtf_blocking
+from algoritmos.round_robin_blocking import round_robin_blocking
+
+from utils.metricas import calcular_metricas
+
+
+class AlgorithmScreen(ctk.CTkFrame):
+    def __init__(self, master, procesos_data, volver_inicio):
+        super().__init__(master)
+        self.procesos_data = procesos_data
+        self.volver_inicio = volver_inicio
+        
+        # Variables para almacenar el gráfico actual
+        self.current_gantt = None
+        self.current_algorithm = None
+        self.current_fig = None
+
+        # --- Selección de algoritmo ---
+        self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
+        self.label_title.pack(pady=10)
+
+        self.algoritmos = ["FIFO", "SJF", "SRTF", "Round Robin"]
+        self.selected_algo = ctk.StringVar(value=self.algoritmos[0])
+        self.option_menu = ctk.CTkOptionMenu(
+            self, values=self.algoritmos, variable=self.selected_algo, command=self._on_algo_change
+        )
+        self.option_menu.pack(pady=5)
+
+        # --- Botones de control ---
+        btn_frame = ctk.CTkFrame(self)
+        btn_frame.pack(pady=10)
+        self.btn_run = ctk.CTkButton(btn_frame, text="Ejecutar", command=self._run_algorithm)
+        self.btn_run.pack(side="left", padx=5)
+        self.btn_export = ctk.CTkButton(btn_frame, text="Exportar PNG", command=self._export_png, 
+                                      fg_color="green", hover_color="#006600")
+        self.btn_export.pack(side="left", padx=5)
+        self.btn_new = ctk.CTkButton(btn_frame, text="Nuevo ejercicio", command=self.volver_inicio)
+        self.btn_new.pack(side="left", padx=5)
+        self.btn_exit = ctk.CTkButton(
+            btn_frame, text="Salir", fg_color="red", hover_color="#aa0000", command=self._salir
+        )
+        self.btn_exit.pack(side="left", padx=5)
+
+        # --- Campo quantum (solo si RR) ---
+        self.frame_quantum = ctk.CTkFrame(self)
+        self.label_quantum = ctk.CTkLabel(self.frame_quantum, text="Quantum:")
+        self.label_quantum.pack(side="left", padx=5)
+        self.entry_quantum = ctk.CTkEntry(self.frame_quantum, placeholder_text="Ej: 2", width=60)
+        self.entry_quantum.pack(side="left", padx=5)
+
+        # --- Tabla BCP ---
+        self.tree = ttk.Treeview(self, columns=("PID", "Llegada", "CPU", "TR", "TE"), show="headings", height=8)
+        for col in ("PID", "Llegada", "CPU", "TR", "TE"):
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=80, anchor="center")
+        self.tree.pack(pady=10, fill="x")
+
+        # --- Label promedios ---
+        self.label_promedios = ctk.CTkLabel(self, text="TRM: -    |    TEM: -", font=("Arial", 14))
+        self.label_promedios.pack(pady=5)
+
+        # --- Frame gráfico ---
+        self.frame_gantt = ctk.CTkFrame(self)
+        self.frame_gantt.pack(pady=10, fill="both", expand=True)
+
+    def _on_algo_change(self, value):
+        if value == "Round Robin":
+            self.frame_quantum.pack(before=self.tree, pady=5)
+        else:
+            self.frame_quantum.pack_forget()
+
+    def _run_algorithm(self):
+        # Crear copias de los procesos para no modificar los originales
+        from copy import deepcopy
+        procesos = [Process(p["pid"], p["arrival_time"], p["bursts"]) for p in self.procesos_data]
+        algo = self.selected_algo.get()
+
+        try:
+            if algo == "FIFO":
+                gantt, result = fifo_blocking(procesos)
+            elif algo == "SJF":
+                gantt, result = sjf_blocking(procesos)
+            elif algo == "SRTF":
+                gantt, result = srtf_blocking(procesos)
+            elif algo == "Round Robin":
+                quantum = self._get_quantum()
+                if quantum is None:
+                    return
+                # Detectar si los procesos tienen bloqueos
+                tiene_bloqueos = any(len(p["bursts"]) > 1 for p in self.procesos_data)
+                if tiene_bloqueos:
+                    gantt, result = round_robin_blocking(procesos, quantum)
+                else:
+                    gantt, result = round_robin(procesos, quantum)
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error al ejecutar: {e}")
+            return
+
+        # Calcular métricas
+        metricas, trm, tem = calcular_metricas(result)
+
+        # Actualizar tabla
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+        for m in metricas:
+            self.tree.insert("", "end", values=(m["PID"], m["Llegada"], m["CPU"], m["TR"], m["TE"]))
+
+        # Actualizar promedios
+        self.label_promedios.configure(
+            text=f"TRM (Tiempo de Respuesta Medio): {trm:.2f}    |    TEM (Tiempo de Espera Medio): {tem:.2f}"
+        )
+
+        # Almacenar datos del gráfico para exportación
+        self.current_gantt = gantt
+        self.current_algorithm = algo
+        
+        # Mostrar gráfico
+        self._mostrar_gantt_embebido(gantt, algo)
+
+    def _get_quantum(self):
+        try:
+            quantum = int(self.entry_quantum.get())
+            if quantum <= 0:
+                raise ValueError
+            return quantum
+        except ValueError:
+            messagebox.showerror("Error", "Ingrese un quantum válido (> 0)")
+            return None
+
+    def _mostrar_gantt_embebido(self, gantt_chart, algo):
+        for widget in self.frame_gantt.winfo_children():
+            widget.destroy()
+
+        norm = []
+        for seg in gantt_chart:
+            if len(seg) == 3:
+                pid, start, end = seg
+                tipo = "CPU" if pid != "IDLE" else "IDLE"
+                norm.append((pid, start, end, tipo))
+            elif len(seg) == 4:
+                norm.append(seg)
+
+        # Ajustar el tamaño del gráfico según el número de procesos y duración total
+        num_procesos = len(set(pid for pid, _, _, tipo in norm if pid != "IDLE"))
+        max_time = max(end for _, _, end, _ in norm) if norm else 1
+        
+        # Calcular dimensiones adaptativas - más ancho para mostrar todos los ticks
+        fig_width = max(15, max_time * 0.25)  # Ancho basado en duración total, más generoso
+        fig_height = max(4, num_procesos * 0.8)  # Altura basada en número de procesos
+        
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        
+        procesos_unicos = [pid for pid, _, _, tipo in norm if pid != "IDLE"]
+        procesos_unicos = list(dict.fromkeys(procesos_unicos))
+        y_positions = {pid: i for i, pid in enumerate(procesos_unicos)}
+
+        colors = {}
+        color_palette = plt.cm.get_cmap("tab20", len(procesos_unicos) + 1)
+
+        for pid, start, end, tipo in norm:
+            if tipo == "IDLE":
+                color = "lightgray"
+                hatch = None
+                y = -1
+                alpha = 0.7
+            elif tipo == "BLOCK":
+                color = "darkred"
+                hatch = "///"
+                y = y_positions.get(pid, 0)
+                alpha = 0.8
+            else:  # CPU
+                if pid not in colors:
+                    colors[pid] = color_palette(len(colors))
+                color = colors[pid]
+                hatch = None
+                y = y_positions.get(pid, 0)
+                alpha = 1.0
+
+            ax.barh(y, end - start, left=start, height=0.6, color=color, 
+                   edgecolor='black', hatch=hatch, alpha=alpha)
+            
+            if tipo != "IDLE":
+                # Mostrar el PID y el tipo de ráfaga
+                text = f"{pid}\n({tipo})" if tipo == "BLOCK" else str(pid)
+                ax.text((start + end) / 2, y, text, ha='center', va='center',
+                        fontsize=7, color="white" if tipo == "BLOCK" else "black",
+                        weight="bold" if tipo == "BLOCK" else "normal")
+
+        if procesos_unicos:
+            ax.set_yticks(list(y_positions.values()))
+            ax.set_yticklabels(list(y_positions.keys()))
+        else:
+            ax.set_yticks([])
+
+        if norm:
+            max_time = max(end for _, _, end, _ in norm)
+            
+            # Mostrar TODOS los ticks del 0 al tiempo máximo
+            ax.set_xticks(range(0, max_time + 1))
+            ax.set_xlim(0, max_time)
+        ax.set_xlabel("Tiempo")
+        ax.set_ylabel("Procesos")
+        ax.set_title(f"Diagrama de Gantt - {algo}")
+        ax.grid(True, axis='x', linestyle='--', alpha=0.6)
+        
+        # Agregar leyenda explicativa
+        legend_elements = [
+            plt.Rectangle((0,0),1,1, facecolor='lightblue', edgecolor='black', label='CPU'),
+            plt.Rectangle((0,0),1,1, facecolor='darkred', edgecolor='black', hatch='///', label='Bloqueo (E/S)'),
+            plt.Rectangle((0,0),1,1, facecolor='lightgray', edgecolor='black', alpha=0.7, label='IDLE')
+        ]
+        ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
+
+        # Ajustar el layout para mejor uso del espacio
+        plt.tight_layout()
+        
+        canvas = FigureCanvasTkAgg(fig, master=self.frame_gantt)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        
+        # Almacenar la figura para exportación
+        self.current_fig = fig
+        
+        # Configurar scroll horizontal si es necesario
+        if fig_width > 15:
+            # Para gráficos muy anchos, permitir scroll horizontal
+            canvas.get_tk_widget().configure(scrollregion=canvas.get_tk_widget().bbox("all"))
+
+    def _export_png(self):
+        """Exporta el gráfico actual como PNG."""
+        if self.current_fig is None:
+            messagebox.showwarning("Advertencia", "No hay gráfico para exportar. Ejecute un algoritmo primero.")
+            return
+        
+        try:
+            from tkinter import filedialog
+            import os
+            from datetime import datetime
+            
+            # Generar nombre de archivo con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"gantt_{self.current_algorithm}_{timestamp}.png"
+            
+            # Abrir diálogo para seleccionar ubicación
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".png",
+                filetypes=[("PNG files", "*.png"), ("All files", "*.*")],
+                initialfile=default_filename,
+                title="Guardar gráfico como PNG"
+            )
+            
+            if file_path:
+                # Exportar con alta resolución
+                self.current_fig.savefig(file_path, dpi=300, bbox_inches='tight', 
+                                       facecolor='white', edgecolor='none')
+                messagebox.showinfo("Éxito", f"Gráfico exportado exitosamente:\n{file_path}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar el gráfico:\n{str(e)}")
+
+    def _salir(self):
+        self.master.destroy()
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\algorithm_screen_backup.py
 
 ...-------------------...
 import customtkinter as ctk
@@ -1167,17 +1593,15 @@ class DataInputScreen(ctk.CTkFrame):
         self.nombres_procesos = nombres_procesos
         self.on_continue = on_continue
 
-        self.entries_ta = []
-        self.entries_cpu1 = []
-        self.entries_bloq = []
-        self.entries_cpu2 = []
-        self.check_vars = []  # Estado de cada checkbox
-
+        # Estructura de datos para múltiples ráfagas
+        self.process_data = {}  # {nombre: {"arrival": int, "bursts": [int, int, ...]}}
+        
         self.label_title = ctk.CTkLabel(self, text="Ingresar datos de procesos", font=("Arial", 18, "bold"))
         self.label_title.pack(pady=20)
 
-        self.form_frame = ctk.CTkFrame(self)
-        self.form_frame.pack(padx=10, pady=10, fill="both", expand=True)
+        # Frame con scroll para muchos procesos
+        self.scroll_frame = ctk.CTkScrollableFrame(self, height=400)
+        self.scroll_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
         self._build_rows()
 
@@ -1186,79 +1610,196 @@ class DataInputScreen(ctk.CTkFrame):
 
     def _build_rows(self):
         for nombre in self.nombres_procesos:
-            row = ctk.CTkFrame(self.form_frame)
-            row.pack(pady=5, fill="x")
+            # Inicializar datos del proceso
+            self.process_data[nombre] = {
+                "arrival": None,
+                "bursts": []
+            }
+            
+            # Frame principal del proceso
+            process_frame = ctk.CTkFrame(self.scroll_frame)
+            process_frame.pack(pady=10, fill="x", padx=5)
+            
+            # Título del proceso
+            title_frame = ctk.CTkFrame(process_frame)
+            title_frame.pack(fill="x", padx=5, pady=5)
+            
+            ctk.CTkLabel(title_frame, text=f"Proceso: {nombre}", font=("Arial", 14, "bold")).pack(side="left")
+            
+            # Tiempo de llegada
+            arrival_frame = ctk.CTkFrame(process_frame)
+            arrival_frame.pack(fill="x", padx=5, pady=2)
+            
+            ctk.CTkLabel(arrival_frame, text="Tiempo de llegada:", width=120).pack(side="left", padx=5)
+            arrival_entry = ctk.CTkEntry(arrival_frame, placeholder_text="Ej: 0", width=80)
+            arrival_entry.pack(side="left", padx=5)
+            
+            # Frame para las ráfagas
+            bursts_frame = ctk.CTkFrame(process_frame)
+            bursts_frame.pack(fill="x", padx=5, pady=5)
+            
+            ctk.CTkLabel(bursts_frame, text="Secuencia de ráfagas:", font=("Arial", 12, "bold")).pack(anchor="w", padx=5, pady=2)
+            
+            # Frame para los controles de ráfagas
+            controls_frame = ctk.CTkFrame(bursts_frame)
+            controls_frame.pack(fill="x", padx=5, pady=2)
+            
+            # Botón para agregar ráfaga
+            add_btn = ctk.CTkButton(controls_frame, text="+ Agregar ráfaga", width=120, 
+                                   command=lambda n=nombre: self._add_burst(n))
+            add_btn.pack(side="left", padx=5)
+            
+            # Frame para mostrar las ráfagas
+            bursts_display_frame = ctk.CTkFrame(bursts_frame)
+            bursts_display_frame.pack(fill="x", padx=5, pady=5)
+            
+            # Almacenar referencias para este proceso
+            self.process_data[nombre]["arrival_entry"] = arrival_entry
+            self.process_data[nombre]["bursts_display_frame"] = bursts_display_frame
+            self.process_data[nombre]["burst_entries"] = []
+            
+            # Agregar primera ráfaga de CPU por defecto
+            self._add_burst(nombre, burst_type="CPU")
 
-            ctk.CTkLabel(row, text=nombre, width=80).pack(side="left", padx=5)
-
-            ta = ctk.CTkEntry(row, placeholder_text="Llegada", width=60)
-            ta.pack(side="left", padx=5)
-            self.entries_ta.append(ta)
-
-            cpu1 = ctk.CTkEntry(row, placeholder_text="CPU1", width=60)
-            cpu1.pack(side="left", padx=5)
-            self.entries_cpu1.append(cpu1)
-
-            var = ctk.BooleanVar(value=False)
-            chk = ctk.CTkCheckBox(row, text="Tiene bloqueo", variable=var,
-                                  command=lambda v=var, r=row: self._toggle_block_fields(v, r))
-            chk.pack(side="left", padx=5)
-            self.check_vars.append(var)
-
-            # Campos de bloqueo ocultos por defecto
-            bloq = ctk.CTkEntry(row, placeholder_text="Bloqueo (E/S)", width=80)
-            cpu2 = ctk.CTkEntry(row, placeholder_text="CPU2", width=60)
-            self.entries_bloq.append(bloq)
-            self.entries_cpu2.append(cpu2)
-
-    def _toggle_block_fields(self, var, row):
-        idx = self.check_vars.index(var)
-        bloq = self.entries_bloq[idx]
-        cpu2 = self.entries_cpu2[idx]
-        if var.get():
-            bloq.pack(side="left", padx=5)
-            cpu2.pack(side="left", padx=5)
+    def _add_burst(self, process_name, burst_type=None):
+        """Agrega una nueva ráfaga al proceso especificado."""
+        process_info = self.process_data[process_name]
+        burst_entries = process_info["burst_entries"]
+        display_frame = process_info["bursts_display_frame"]
+        
+        # Determinar el tipo de ráfaga si no se especifica
+        if burst_type is None:
+            # Si no hay ráfagas, empezar con CPU
+            if not burst_entries:
+                burst_type = "CPU"
+            else:
+                # Alternar entre CPU y Bloqueo
+                last_type = burst_entries[-1]["type"]
+                burst_type = "Bloqueo" if last_type == "CPU" else "CPU"
+        
+        # Frame para esta ráfaga
+        burst_frame = ctk.CTkFrame(display_frame)
+        burst_frame.pack(fill="x", padx=2, pady=2)
+        
+        # Tipo de ráfaga
+        type_label = ctk.CTkLabel(burst_frame, text=f"{burst_type}:", width=80)
+        type_label.pack(side="left", padx=5)
+        
+        # Campo de entrada
+        burst_entry = ctk.CTkEntry(burst_frame, placeholder_text=f"Duración {burst_type}", width=100)
+        burst_entry.pack(side="left", padx=5)
+        
+        # Botón para eliminar
+        remove_btn = ctk.CTkButton(burst_frame, text="✕", width=30, height=25,
+                                  command=lambda: self._remove_burst(process_name, burst_frame))
+        remove_btn.pack(side="left", padx=5)
+        
+        # Almacenar información de la ráfaga
+        burst_info = {
+            "frame": burst_frame,
+            "entry": burst_entry,
+            "type": burst_type
+        }
+        burst_entries.append(burst_info)
+        
+        # Actualizar la secuencia visual
+        self._update_sequence_display(process_name)
+    
+    def _remove_burst(self, process_name, burst_frame):
+        """Elimina una ráfaga del proceso especificado."""
+        process_info = self.process_data[process_name]
+        burst_entries = process_info["burst_entries"]
+        
+        # Encontrar y eliminar la ráfaga
+        for i, burst_info in enumerate(burst_entries):
+            if burst_info["frame"] == burst_frame:
+                burst_entries.pop(i)
+                burst_frame.destroy()
+                break
+        
+        # Actualizar la secuencia visual
+        self._update_sequence_display(process_name)
+    
+    def _update_sequence_display(self, process_name):
+        """Actualiza la visualización de la secuencia de ráfagas."""
+        process_info = self.process_data[process_name]
+        burst_entries = process_info["burst_entries"]
+        
+        # Crear texto descriptivo de la secuencia
+        if burst_entries:
+            sequence_parts = []
+            for i, burst_info in enumerate(burst_entries):
+                sequence_parts.append(f"{burst_info['type']}{i+1}")
+            sequence_text = " → ".join(sequence_parts)
         else:
-            bloq.pack_forget()
-            cpu2.pack_forget()
-            bloq.delete(0, "end")
-            cpu2.delete(0, "end")
+            sequence_text = "Sin ráfagas"
+        
+        # Actualizar o crear label de secuencia
+        if "sequence_label" not in process_info:
+            sequence_label = ctk.CTkLabel(process_info["bursts_display_frame"], 
+                                        text=f"Secuencia: {sequence_text}", 
+                                        font=("Arial", 10, "italic"))
+            sequence_label.pack(anchor="w", padx=5, pady=2)
+            process_info["sequence_label"] = sequence_label
+        else:
+            process_info["sequence_label"].configure(text=f"Secuencia: {sequence_text}")
 
     def _continue_clicked(self):
         procesos_data = []
         try:
-            for i, nombre in enumerate(self.nombres_procesos):
-                ta_str = self.entries_ta[i].get().strip()
-                cpu1_str = self.entries_cpu1[i].get().strip()
+            for nombre in self.nombres_procesos:
+                process_info = self.process_data[nombre]
+                
+                # Validar tiempo de llegada
+                arrival_str = process_info["arrival_entry"].get().strip()
+                if not arrival_str:
+                    raise ValueError(f"Proceso {nombre}: Tiempo de llegada requerido")
+                
+                arrival_time = int(arrival_str)
+                if arrival_time < 0:
+                    raise ValueError(f"Proceso {nombre}: Tiempo de llegada debe ser ≥ 0")
+                
+                # Validar ráfagas
+                burst_entries = process_info["burst_entries"]
+                if not burst_entries:
+                    raise ValueError(f"Proceso {nombre}: Debe tener al menos una ráfaga")
+                
+                bursts = []
+                for burst_info in burst_entries:
+                    duration_str = burst_info["entry"].get().strip()
+                    if not duration_str:
+                        raise ValueError(f"Proceso {nombre}: Todas las duraciones son requeridas")
+                    
+                    duration = int(duration_str)
+                    if duration < 0:
+                        raise ValueError(f"Proceso {nombre}: Las duraciones deben ser ≥ 0")
+                    
+                    bursts.append(duration)
+                
+                # Validar que termine con CPU (índice par)
+                if len(bursts) % 2 == 0:
+                    # Termina con CPU, está bien
+                    pass
+                else:
+                    # Termina con bloqueo, agregar CPU de 0
+                    bursts.append(0)
+                
+                # Validar que tenga al menos una ráfaga de CPU
+                cpu_bursts = [bursts[i] for i in range(0, len(bursts), 2)]
+                if not any(cpu > 0 for cpu in cpu_bursts):
+                    raise ValueError(f"Proceso {nombre}: Debe tener al menos una ráfaga de CPU > 0")
+                
+                procesos_data.append({
+                    "pid": nombre, 
+                    "arrival_time": arrival_time, 
+                    "bursts": bursts
+                })
 
-                if not ta_str or not cpu1_str:
-                    raise ValueError
-
-                ta = int(ta_str)
-                cpu1 = int(cpu1_str)
-                if ta < 0 or cpu1 <= 0:
-                    raise ValueError
-
-                bursts = [cpu1]
-
-                if self.check_vars[i].get():
-                    bloq_str = self.entries_bloq[i].get().strip()
-                    cpu2_str = self.entries_cpu2[i].get().strip()
-                    if not bloq_str or not cpu2_str:
-                        raise ValueError
-                    bloq = int(bloq_str)
-                    cpu2 = int(cpu2_str)
-                    if bloq < 0 or cpu2 <= 0:
-                        raise ValueError
-                    bursts.extend([bloq, cpu2])
-
-                procesos_data.append({"pid": nombre, "arrival_time": ta, "bursts": bursts})
-
-        except ValueError:
-            messagebox.showerror(
-                "Error",
-                "Verifique que:\n- Llegada ≥ 0\n- CPU1 > 0\n- Si marca bloqueo, complete Bloqueo y CPU2\n- Todos los valores sean enteros."
-            )
+        except ValueError as e:
+            messagebox.showerror("Error de validación", str(e))
+            return
+        except Exception as e:
+            messagebox.showerror("Error", f"Error inesperado: {e}")
             return
 
         self.on_continue(procesos_data)
@@ -1433,6 +1974,46 @@ class Process:
 
         # Tiempo de espera real en cola de listos
         self.waiting_time = self.turnaround_time - total_cpu - total_bloq
+
+    def get_total_cpu_time(self):
+        """Retorna el tiempo total de CPU del proceso."""
+        return sum(self.bursts[i] for i in range(0, len(self.bursts), 2))
+    
+    def get_total_blocking_time(self):
+        """Retorna el tiempo total de bloqueo del proceso."""
+        return sum(self.bursts[i] for i in range(1, len(self.bursts), 2))
+    
+    def get_burst_count(self):
+        """Retorna el número total de ráfagas (CPU + bloqueos)."""
+        return len(self.bursts)
+    
+    def get_cpu_burst_count(self):
+        """Retorna el número de ráfagas de CPU."""
+        return len([i for i in range(0, len(self.bursts), 2)])
+    
+    def get_blocking_burst_count(self):
+        """Retorna el número de ráfagas de bloqueo."""
+        return len([i for i in range(1, len(self.bursts), 2)])
+    
+    def is_finished(self):
+        """True si el proceso ha terminado todas sus ráfagas."""
+        return self.current_burst_index >= len(self.bursts)
+    
+    def get_remaining_bursts(self):
+        """Retorna las ráfagas restantes del proceso."""
+        return self.bursts[self.current_burst_index:] if self.current_burst_index < len(self.bursts) else []
+    
+    def get_burst_sequence_description(self):
+        """Retorna una descripción legible de la secuencia de ráfagas."""
+        if not self.bursts:
+            return "Sin ráfagas"
+        
+        sequence = []
+        for i, duration in enumerate(self.bursts):
+            burst_type = "CPU" if i % 2 == 0 else "Bloqueo"
+            sequence.append(f"{burst_type}({duration})")
+        
+        return " → ".join(sequence)
 
     def __repr__(self):
         return (f"Process(pid={self.pid}, arrival={self.arrival_time}, bursts={self.bursts}, "
