@@ -18,6 +18,7 @@ from algoritmos.srtf_blocking import srtf_blocking
 from algoritmos.round_robin_blocking import round_robin_blocking
 
 from utils.metricas import calcular_metricas
+from utils.excel_export import exportar_a_excel
 
 
 class AlgorithmScreen(ctk.CTkFrame):
@@ -30,6 +31,10 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.current_gantt = None
         self.current_algorithm = None
         self.current_fig = None
+        self.current_metricas = None
+        self.current_trm = None
+        self.current_tem = None
+        self.current_quantum = None
 
         # --- Selección de algoritmo ---
         self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
@@ -50,6 +55,9 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.btn_export = ctk.CTkButton(btn_frame, text="Exportar PNG", command=self._export_png, 
                                       fg_color="green", hover_color="#006600")
         self.btn_export.pack(side="left", padx=5)
+        self.btn_export_excel = ctk.CTkButton(btn_frame, text="Exportar Excel", command=self._export_excel, 
+                                            fg_color="purple", hover_color="#660066")
+        self.btn_export_excel.pack(side="left", padx=5)
         self.btn_new = ctk.CTkButton(btn_frame, text="Nuevo ejercicio", command=self.volver_inicio)
         self.btn_new.pack(side="left", padx=5)
         self.btn_exit = ctk.CTkButton(
@@ -129,6 +137,15 @@ class AlgorithmScreen(ctk.CTkFrame):
         # Almacenar datos del gráfico para exportación
         self.current_gantt = gantt
         self.current_algorithm = algo
+        self.current_metricas = metricas
+        self.current_trm = trm
+        self.current_tem = tem
+        
+        # Obtener quantum si es Round Robin
+        if algo == "Round Robin":
+            self.current_quantum = self._get_quantum()
+        else:
+            self.current_quantum = None
         
         # Mostrar gráfico
         self._mostrar_gantt_embebido(gantt, algo)
@@ -273,6 +290,51 @@ class AlgorithmScreen(ctk.CTkFrame):
                 
         except Exception as e:
             messagebox.showerror("Error", f"Error al exportar el gráfico:\n{str(e)}")
+
+    def _export_excel(self):
+        """Exporta los resultados actuales a un archivo Excel."""
+        if (self.current_gantt is None or self.current_algorithm is None or 
+            self.current_metricas is None):
+            messagebox.showwarning("Advertencia", "No hay datos para exportar. Ejecute un algoritmo primero.")
+            return
+        
+        try:
+            from tkinter import filedialog
+            import os
+            from datetime import datetime
+            
+            # Generar nombre de archivo con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"resultados_{self.current_algorithm}_{timestamp}.xlsx"
+            
+            # Abrir diálogo para seleccionar ubicación
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                initialfile=default_filename,
+                title="Guardar resultados como Excel"
+            )
+            
+            if file_path:
+                # Crear archivo temporal
+                temp_file = exportar_a_excel(
+                    procesos_data=self.procesos_data,
+                    algoritmo=self.current_algorithm,
+                    gantt_data=self.current_gantt,
+                    metricas=self.current_metricas,
+                    trm=self.current_trm,
+                    tem=self.current_tem,
+                    quantum=self.current_quantum
+                )
+                
+                # Mover el archivo a la ubicación seleccionada
+                import shutil
+                shutil.move(temp_file, file_path)
+                
+                messagebox.showinfo("Éxito", f"Resultados exportados exitosamente a:\n{file_path}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar a Excel:\n{str(e)}")
 
     def _salir(self):
         self.master.destroy()

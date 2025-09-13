@@ -233,7 +233,7 @@ class DataInputScreen(ctk.CTkFrame):
 
     def _guardar_configuracion(self):
         """Guarda la configuración actual de inputs."""
-        # Crear ventana de diálogo para ingresar nombre
+        # Crear ventana de diálogo para ingresar nombre de
         dialog = ctk.CTkToplevel(self)
         dialog.title("Guardar configuración")
         dialog.geometry("400x150")

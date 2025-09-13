@@ -60,7 +60,7 @@ def _leer_input_historial():
     return []
 
 def _guardar_input_historial(data):
-    """Guarda el historial de inputs en el archivo JSON."""
+    """Guarda el historial de inputs en el archivo JSON.""" #a partir de esto se puede cargar luego.
     with open(INPUT_HISTORIAL_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
