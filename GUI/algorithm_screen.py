@@ -3,6 +3,8 @@ from tkinter import messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
+from utils import historial
+
 from models.process import Process
 # Algoritmos sin bloqueos
 from algoritmos.fifo import fifo
