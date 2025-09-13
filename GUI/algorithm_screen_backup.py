@@ -9,12 +9,10 @@ from algoritmos.fifo import fifo
 from algoritmos.sjf import sjf
 from algoritmos.srtf import srtf
 from algoritmos.roundrobin import round_robin
-from algoritmos.round_robin_blocking import round_robin_blocking
 # Algoritmos con bloqueos
 from algoritmos.fifo_blocking import fifo_blocking
 from algoritmos.sjf_blocking import sjf_blocking
 from algoritmos.srtf_blocking import srtf_blocking
-from algoritmos.roundrobin import round_robin
 from algoritmos.round_robin_blocking import round_robin_blocking
 
 from utils.metricas import calcular_metricas
@@ -92,12 +90,7 @@ class AlgorithmScreen(ctk.CTkFrame):
                 quantum = self._get_quantum()
                 if quantum is None:
                     return
-                # Detectar si los procesos tienen bloqueos
-                tiene_bloqueos = any(len(p["bursts"]) > 1 for p in self.procesos_data)
-                if tiene_bloqueos:
-                    gantt, result = round_robin_blocking(procesos, quantum)
-                else:
-                    gantt, result = round_robin(procesos, quantum)
+                gantt, result = round_robin_blocking(procesos, quantum)
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error al ejecutar: {e}")
             return

@@ -21,6 +21,10 @@ def sjf_blocking(process_list):
     n = len(processes)
     arrived = set()   # PIDs ya encolados por llegada
 
+    # Buffers de encolado con prioridad
+    enq_cpu = []      # procesos que entran por llegada o fin de CPU
+    enq_unblock = []  # procesos que entran por fin de bloqueo
+
     def collapse_zeros(proc, t):
         while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
             proc.advance_burst()
@@ -31,7 +35,6 @@ def sjf_blocking(process_list):
 
     def enqueue_arrivals_leq_t(t):
         nonlocal completed
-        changed = False
         for p in processes:
             if p.pid in arrived:
                 continue
@@ -42,8 +45,7 @@ def sjf_blocking(process_list):
                     continue
                 if p.is_cpu_burst():
                     p.ready_since = p.arrival_time
-                    ready.append(p)
-                    changed = True
+                    enq_cpu.append(p)  # llegada → prioridad CPU_FINISH
                 else:
                     dur = p.bursts[p.current_burst_index]
                     if dur > 0:
@@ -55,12 +57,15 @@ def sjf_blocking(process_list):
                             completed += 1
                         elif p.is_cpu_burst():
                             p.ready_since = p.arrival_time
-                            ready.append(p)
-                            changed = True
-        return changed
+                            enq_cpu.append(p)
 
     # Inicializar con todos los procesos que llegan en tiempo 0 o antes
     enqueue_arrivals_leq_t(time)
+    if enq_cpu or enq_unblock:
+        ready.extend(enq_cpu)
+        ready.extend(enq_unblock)
+        enq_cpu.clear()
+        enq_unblock.clear()
 
     while completed < n:
         # 1) Procesar TODOS los desbloqueos que vencieron hasta t
@@ -75,7 +80,7 @@ def sjf_blocking(process_list):
                     continue
                 if bp.is_cpu_burst():
                     bp.ready_since = time
-                    ready.append(bp)
+                    enq_unblock.append(bp)  # fin de BLOQ → va detrás de CPU_FINISH
                 else:
                     dur = bp.bursts[bp.current_burst_index]
                     if dur > 0:
@@ -87,10 +92,17 @@ def sjf_blocking(process_list):
                             completed += 1
                         elif bp.is_cpu_burst():
                             bp.ready_since = time
-                            ready.append(bp)
+                            enq_unblock.append(bp)
 
         # 2) Encolar llegadas que hayan llegado hasta este momento
         enqueue_arrivals_leq_t(time)
+
+        # 2.1) Volcar buffers a ready con prioridad CPU_FINISH > UNBLOCK
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
         # 3) Si no hay listos, saltar al siguiente evento
         if not ready:
@@ -108,19 +120,19 @@ def sjf_blocking(process_list):
                 time += 1
             continue
 
-        # 4) Selección SJF: elegir el proceso con la ráfaga de CPU actual más corta
+        # 4) Selección SJF
         ready = [p for p in ready if p.current_burst_index < len(p.bursts)]
         ready.sort(key=lambda x: (
-            x.bursts[x.current_burst_index],  # SJF: ráfaga actual de CPU más corta
+            x.bursts[x.current_burst_index],  # ráfaga actual más corta
             x.arrival_time,                   # FIFO en empates
-            x.pid                            # estabilidad
+            x.pid
         ))
 
         current = ready.pop(0)
         if current.start_time is None:
             current.start_time = time
 
-        # 5) Ejecutar ráfaga completa (no expulsivo)
+        # 5) Ejecutar ráfaga completa
         start = time
         cpu_dur = current.bursts[current.current_burst_index]
         if cpu_dur <= 0:
@@ -129,7 +141,7 @@ def sjf_blocking(process_list):
             else:
                 if current.is_cpu_burst():
                     current.ready_since = time
-                    ready.append(current)
+                    enq_cpu.append(current)
             continue
 
         time += cpu_dur
@@ -146,10 +158,8 @@ def sjf_blocking(process_list):
             continue
 
         if current.is_cpu_burst():
-            # En SJF blocking, los procesos deben volver a la cola ready
-            # después de terminar una ráfaga de CPU para competir nuevamente
             current.ready_since = time
-            ready.append(current)
+            enq_cpu.append(current)
         else:
             dur = current.bursts[current.current_burst_index]
             if dur > 0:
@@ -161,6 +171,13 @@ def sjf_blocking(process_list):
                     completed += 1
                 elif current.is_cpu_burst():
                     current.ready_since = time
-                    ready.append(current)
+                    enq_cpu.append(current)
+
+        # 6.1) Volcar buffers a ready con prioridad
+        if enq_cpu or enq_unblock:
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
+            enq_cpu.clear()
+            enq_unblock.clear()
 
     return gantt, processes
