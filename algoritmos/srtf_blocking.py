@@ -1,155 +1,170 @@
 from copy import deepcopy
 
 def srtf_blocking(process_list):
-    """
-    SRTF expulsivo con soporte para procesos mixtos (con y sin bloqueos).
-    - Criterio: CPU total restante (CPU actual + futuras CPUs).
-    - arrival_time nunca se modifica.
-    - Bloqueos manejados con unblock_time (sin restar tick a tick).
-    - Gantt: (pid, start, end, tipo) con tipo en {"CPU","BLOCK"}.
-    """
+    """SRTF expulsivo con soporte para bloqueos, usando get_total_cpu_remaining()."""
 
-    def total_cpu_restante(p):
-        """Suma CPU restante de la ráfaga actual + CPUs futuras."""
-        idx = p.current_burst_index
-        if idx >= len(p.bursts):
-            return 0
-        if idx % 2 == 0:  # CPU
-            total = p.remaining_time
-            for i in range(idx + 2, len(p.bursts), 2):
-                total += p.bursts[i]
-            return total
-        return float("inf")  # si está en bloqueo, no debería estar en ready
+    def collapse_zeros(proc, t):
+        while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
+            proc.advance_burst()
+        if proc.current_burst_index >= len(proc.bursts):
+            proc.completion_time = t
+            return True
+        return False
+
+    def handle_post(proc, t, destino_cpu, destino_unblock, destino_blocked, gantt):
+        if collapse_zeros(proc, t):
+            return True
+        if proc.is_cpu_burst():
+            destino_cpu.append(proc)
+        else:
+            dur = proc.bursts[proc.current_burst_index]
+            if dur > 0:
+                gantt.append((proc.pid, t, t + dur, "BLOCK"))
+                destino_blocked.append((proc, t + dur))
+            else:
+                proc.advance_burst()
+                return handle_post(proc, t, destino_cpu, destino_unblock, destino_blocked, gantt)
+        return False
 
     processes = deepcopy(process_list)
+    for idx, p in enumerate(processes):
+        if not hasattr(p, "bursts_original"):
+            p.bursts_original = p.bursts[:]
+        p._seq = idx
+        p.ready_since = None
+        p.start_time = None
+        p.completion_time = None
+
     time = 0
-    gantt_chart = []
-    ready_queue = []
-    blocked_queue = []  # (proceso, unblock_time)
+    gantt = []
+    ready = []
+    blocked = []
     completed = 0
     n = len(processes)
+    arrived = set()
+
+    enq_cpu = []
+    enq_unblock = []
+
+    def enqueue_arrivals_leq_t(t):
+        nonlocal completed
+        for p in processes:
+            if p.pid in arrived:
+                continue
+            if p.arrival_time <= t and p.completion_time is None:
+                arrived.add(p.pid)
+                if handle_post(p, t, enq_cpu, enq_unblock, blocked, gantt):
+                    completed += 1
+
+    def process_unblocks_leq_t(t):
+        nonlocal completed
+        for (bp, unb) in blocked[:]:
+            if unb <= t:
+                blocked.remove((bp, unb))
+                bp.advance_burst()
+                if handle_post(bp, t, enq_unblock, enq_unblock, blocked, gantt):
+                    completed += 1
+
+    enqueue_arrivals_leq_t(time)
+    if enq_cpu or enq_unblock:
+        ready.extend(enq_cpu)
+        ready.extend(enq_unblock)
+        enq_cpu.clear()
+        enq_unblock.clear()
 
     current = None
-    start_time = None
-
-    # Buffers de encolado con prioridad
-    enq_cpu = []      # llegada o fin de CPU
-    enq_unblock = []  # fin de bloqueo
+    seg_start = None
 
     while completed < n:
-        # 1) Llegadas
-        for p in processes:
-            if (
-                p.arrival_time == time
-                and p.completion_time is None
-                and p not in ready_queue
-                and all(bp is not p for bp, _ in blocked_queue)
-                and p is not current
-                and p not in enq_cpu
-                and p not in enq_unblock
-            ):
-                if p.is_cpu_burst():
-                    enq_cpu.append(p)
-                else:
-                    dur = p.bursts[p.current_burst_index]
-                    if dur > 0:
-                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))
-                        blocked_queue.append((p, time + dur))
-                    else:
-                        p.advance_burst()
-                        if p.is_cpu_burst():
-                            enq_cpu.append(p)
+        process_unblocks_leq_t(time)
+        enqueue_arrivals_leq_t(time)
 
-        # 2) Desbloqueos
-        for (bp, unblock_time) in blocked_queue[:]:
-            if unblock_time == time:
-                blocked_queue.remove((bp, unblock_time))
-                bp.advance_burst()
-                if bp.current_burst_index >= len(bp.bursts):
-                    bp.completion_time = time
-                    bp.calculate_metrics()
-                    completed += 1
-                else:
-                    if bp.is_cpu_burst():
-                        enq_unblock.append(bp)
-                    else:
-                        dur2 = bp.bursts[bp.current_burst_index]
-                        if dur2 > 0:
-                            gantt_chart.append((bp.pid, time, time + dur2, "BLOCK"))
-                            blocked_queue.append((bp, time + dur2))
-                        else:
-                            bp.advance_burst()
-                            if bp.is_cpu_burst():
-                                enq_unblock.append(bp)
-
-        # 2.1) Volcar buffers a ready con prioridad CPU_FINISH/llegada > UNBLOCK
         if enq_cpu or enq_unblock:
-            ready_queue.extend(enq_cpu)
-            ready_queue.extend(enq_unblock)
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
             enq_cpu.clear()
             enq_unblock.clear()
 
-        # 3) Selección SRTF por CPU total restante, con desempate por FIFO
-        eligibles = [p for p in ready_queue if p.is_cpu_burst()]
-        if eligibles:
-            eligibles.sort(key=lambda x: (
-                total_cpu_restante(x),  # SRTF: menor CPU total restante
-                x.arrival_time,         # FIFO en empates
-                x.pid                   # estabilidad
-            ))
-            candidate = eligibles[0]
-            if current is not candidate:
-                if current is not None:
-                    gantt_chart.append((current.pid, start_time, time, "CPU"))
-                current = candidate
-                start_time = time
-                if current.start_time is None:
-                    current.start_time = time
-        else:
-            # No hay listos, avanzar tiempo
-            time += 1
+        eligibles = [p for p in ready if p.is_cpu_burst() and not p.is_finished()]
+        if not eligibles:
+            future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived and p.completion_time is None]
+            future_unblocks = [unb for _, unb in blocked]
+            if not future_arrivals and not future_unblocks:
+                break
+            next_event = min(future_arrivals + future_unblocks) if (future_arrivals or future_unblocks) else None
+            if next_event is None:
+                time += 1
+            elif next_event > time:
+                gantt.append(("IDLE", time, next_event, "IDLE"))
+                time = next_event
+            else:
+                time += 1
+            current = None
+            seg_start = None
             continue
 
-        # 4) Ejecutar 1 unidad
-        current.remaining_time -= 1
+        eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.ready_since or x.arrival_time, x.pid))
+        candidate = eligibles[0]
+
+        if current is not candidate:
+            if current is not None and seg_start is not None and time > seg_start:
+                gantt.append((current.pid, seg_start, time, "CPU"))
+            current = candidate
+            seg_start = time
+            if current.start_time is None:
+                current.start_time = time
+
+        # Ejecutar 1 tick
+        current.bursts[current.current_burst_index] -= 1
+        current.remaining_time = current.get_total_cpu_remaining()
         time += 1
 
-        # 5) ¿Terminó la ráfaga de CPU?
-        if current.remaining_time == 0:
-            gantt_chart.append((current.pid, start_time, time, "CPU"))
-            if current in ready_queue:
-                ready_queue.remove(current)
+        # Fin de ráfaga
+        if current.bursts[current.current_burst_index] == 0:
+            gantt.append((current.pid, seg_start, time, "CPU"))
             current.advance_burst()
-
-            if current.current_burst_index >= len(current.bursts):
+            if current.is_finished():
                 current.completion_time = time
-                current.calculate_metrics()
                 completed += 1
                 current = None
+                seg_start = None
             else:
-                if current.is_cpu_burst():
-                    enq_cpu.append(current)
-                    current = None
-                else:
-                    dur = current.bursts[current.current_burst_index]
-                    if dur > 0:
-                        gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
-                        blocked_queue.append((current, time + dur))
-                    else:
-                        current.advance_burst()
-                        if current.is_cpu_burst():
-                            enq_cpu.append(current)
-                    current = None
+                if handle_post(current, time, enq_cpu, enq_unblock, blocked, gantt):
+                    completed += 1
+                current = None
+                seg_start = None
+            if enq_cpu or enq_unblock:
+                ready.extend(enq_cpu)
+                ready.extend(enq_unblock)
+                enq_cpu.clear()
+                enq_unblock.clear()
+            continue
 
-        # 5.1) Volcar buffers a ready con prioridad
+        # Preempción
+        process_unblocks_leq_t(time)
+        enqueue_arrivals_leq_t(time)
         if enq_cpu or enq_unblock:
-            ready_queue.extend(enq_cpu)
-            ready_queue.extend(enq_unblock)
+            ready.extend(enq_cpu)
+            ready.extend(enq_unblock)
             enq_cpu.clear()
             enq_unblock.clear()
 
-    # Cierre por seguridad
-    if current is not None:
-        gantt_chart.append((current.pid, start_time, time, "CPU"))
+        eligibles = [p for p in ready if p.is_cpu_burst() and not p.is_finished()]
+        if eligibles:
+            eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.ready_since or x.arrival_time, x.pid))
+            best = eligibles[0]
+            if best is not current and best.get_total_cpu_remaining() < current.get_total_cpu_remaining():
+                gantt.append((current.pid, seg_start, time, "CPU"))
+                current.ready_since = time
+                enq_cpu.append(current)
+                current = None
+                seg_start = None
+                ready.extend(enq_cpu)
+                ready.extend(enq_unblock)
+                enq_cpu.clear()
+                enq_unblock.clear()
 
-    return gantt_chart, processes
+    if current is not None and seg_start is not None and time > seg_start:
+        gantt.append((current.pid, seg_start, time, "CPU"))
+
+    return gantt, processes

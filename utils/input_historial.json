@@ -1,0 +1,94 @@
+[
+    {
+        "nombre": "Punto 1 GUIA 2 JAVI",
+        "fecha": "2025-09-13T16:54:00",
+        "procesos": [
+            {
+                "nombre": "P1",
+                "arrival": 0,
+                "bursts": [
+                    2,
+                    5,
+                    13
+                ]
+            },
+            {
+                "nombre": "P2",
+                "arrival": 0,
+                "bursts": [
+                    9,
+                    3,
+                    5,
+                    5,
+                    4
+                ]
+            },
+            {
+                "nombre": "P3",
+                "arrival": 1,
+                "bursts": [
+                    5
+                ]
+            },
+            {
+                "nombre": "P4",
+                "arrival": 1,
+                "bursts": [
+                    4,
+                    6,
+                    5
+                ]
+            },
+            {
+                "nombre": "P5",
+                "arrival": 2,
+                "bursts": [
+                    5,
+                    5,
+                    5,
+                    5,
+                    5
+                ]
+            },
+            {
+                "nombre": "P6",
+                "arrival": 2,
+                "bursts": [
+                    3
+                ]
+            },
+            {
+                "nombre": "P7",
+                "arrival": 4,
+                "bursts": [
+                    5
+                ]
+            },
+            {
+                "nombre": "P8",
+                "arrival": 6,
+                "bursts": [
+                    5,
+                    2,
+                    5
+                ]
+            },
+            {
+                "nombre": "P9",
+                "arrival": 8,
+                "bursts": [
+                    5
+                ]
+            },
+            {
+                "nombre": "P10",
+                "arrival": 8,
+                "bursts": [
+                    5,
+                    4,
+                    5
+                ]
+            }
+        ]
+    }
+]

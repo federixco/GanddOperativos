@@ -1,13 +1,28 @@
-﻿from copy import deepcopy
+﻿# algoritmo/sjf_blocking.py
+from copy import deepcopy
 
 def sjf_blocking(process_list):
     processes = deepcopy(process_list)
+
+    # --- Helper: total de CPU restante desde la posición actual ---
+    def cpu_total_restante(p):
+        idx = p.current_burst_index
+        if idx >= len(p.bursts):
+            return 0
+        # si está parado en bloqueo (índice impar), la próxima CPU es idx+1
+        start = idx if idx % 2 == 0 else idx + 1
+        total = 0
+        for i in range(start, len(p.bursts), 2):  # sólo posiciones de CPU
+            # si es la CPU actual y ya se consumió parcialmente, el burst refleja lo que queda
+            total += p.bursts[i]
+        return total
 
     # Init por proceso
     for idx, p in enumerate(processes):
         if not hasattr(p, "bursts_original"):
             p.bursts_original = p.bursts[:]
         p._seq = idx
+        # 'remaining_time' queda como métrica informativa; NO se usa para priorizar
         p.remaining_time = sum(b for i, b in enumerate(p.bursts) if i % 2 == 0)
         p.ready_since = None
         p.start_time = None
@@ -120,11 +135,11 @@ def sjf_blocking(process_list):
                 time += 1
             continue
 
-        # 4) Selección SJF
+        # 4) Selección SJF **por total de CPU restante**
         ready = [p for p in ready if p.current_burst_index < len(p.bursts)]
         ready.sort(key=lambda x: (
-            x.bursts[x.current_burst_index],  # ráfaga actual más corta
-            x.arrival_time,                   # FIFO en empates
+            cpu_total_restante(x),                 # menor CPU total restante
+            (x.ready_since if x.ready_since is not None else x.arrival_time),
             x.pid
         ))
 
@@ -145,6 +160,7 @@ def sjf_blocking(process_list):
             continue
 
         time += cpu_dur
+        # 'remaining_time' se ajusta solo como dato; no afecta prioridad
         if hasattr(current, "remaining_time") and current.remaining_time is not None:
             current.remaining_time -= cpu_dur
             if current.remaining_time < 0:

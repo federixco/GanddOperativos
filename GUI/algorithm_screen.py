@@ -3,21 +3,22 @@ from tkinter import messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
+from utils import historial
+
 from models.process import Process
 # Algoritmos sin bloqueos
 from algoritmos.fifo import fifo
 from algoritmos.sjf import sjf
 from algoritmos.srtf import srtf
 from algoritmos.roundrobin import round_robin
-from algoritmos.round_robin_blocking import round_robin_blocking
 # Algoritmos con bloqueos
 from algoritmos.fifo_blocking import fifo_blocking
 from algoritmos.sjf_blocking import sjf_blocking
 from algoritmos.srtf_blocking import srtf_blocking
-from algoritmos.roundrobin import round_robin
 from algoritmos.round_robin_blocking import round_robin_blocking
 
 from utils.metricas import calcular_metricas
+from utils.excel_export import exportar_a_excel
 
 
 class AlgorithmScreen(ctk.CTkFrame):
@@ -25,6 +26,15 @@ class AlgorithmScreen(ctk.CTkFrame):
         super().__init__(master)
         self.procesos_data = procesos_data
         self.volver_inicio = volver_inicio
+        
+        # Variables para almacenar el gráfico actual
+        self.current_gantt = None
+        self.current_algorithm = None
+        self.current_fig = None
+        self.current_metricas = None
+        self.current_trm = None
+        self.current_tem = None
+        self.current_quantum = None
 
         # --- Selección de algoritmo ---
         self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
@@ -42,6 +52,12 @@ class AlgorithmScreen(ctk.CTkFrame):
         btn_frame.pack(pady=10)
         self.btn_run = ctk.CTkButton(btn_frame, text="Ejecutar", command=self._run_algorithm)
         self.btn_run.pack(side="left", padx=5)
+        self.btn_export = ctk.CTkButton(btn_frame, text="Exportar PNG", command=self._export_png, 
+                                      fg_color="green", hover_color="#006600")
+        self.btn_export.pack(side="left", padx=5)
+        self.btn_export_excel = ctk.CTkButton(btn_frame, text="Exportar Excel", command=self._export_excel, 
+                                            fg_color="purple", hover_color="#660066")
+        self.btn_export_excel.pack(side="left", padx=5)
         self.btn_new = ctk.CTkButton(btn_frame, text="Nuevo ejercicio", command=self.volver_inicio)
         self.btn_new.pack(side="left", padx=5)
         self.btn_exit = ctk.CTkButton(
@@ -78,6 +94,8 @@ class AlgorithmScreen(ctk.CTkFrame):
             self.frame_quantum.pack_forget()
 
     def _run_algorithm(self):
+        # Crear copias de los procesos para no modificar los originales
+        from copy import deepcopy
         procesos = [Process(p["pid"], p["arrival_time"], p["bursts"]) for p in self.procesos_data]
         algo = self.selected_algo.get()
 
@@ -116,6 +134,19 @@ class AlgorithmScreen(ctk.CTkFrame):
             text=f"TRM (Tiempo de Respuesta Medio): {trm:.2f}    |    TEM (Tiempo de Espera Medio): {tem:.2f}"
         )
 
+        # Almacenar datos del gráfico para exportación
+        self.current_gantt = gantt
+        self.current_algorithm = algo
+        self.current_metricas = metricas
+        self.current_trm = trm
+        self.current_tem = tem
+        
+        # Obtener quantum si es Round Robin
+        if algo == "Round Robin":
+            self.current_quantum = self._get_quantum()
+        else:
+            self.current_quantum = None
+        
         # Mostrar gráfico
         self._mostrar_gantt_embebido(gantt, algo)
 
@@ -142,7 +173,16 @@ class AlgorithmScreen(ctk.CTkFrame):
             elif len(seg) == 4:
                 norm.append(seg)
 
-        fig, ax = plt.subplots(figsize=(8, 3))
+        # Ajustar el tamaño del gráfico según el número de procesos y duración total
+        num_procesos = len(set(pid for pid, _, _, tipo in norm if pid != "IDLE"))
+        max_time = max(end for _, _, end, _ in norm) if norm else 1
+        
+        # Calcular dimensiones adaptativas - más ancho para mostrar todos los ticks
+        fig_width = max(15, max_time * 0.25)  # Ancho basado en duración total, más generoso
+        fig_height = max(4, num_procesos * 0.8)  # Altura basada en número de procesos
+        
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        
         procesos_unicos = [pid for pid, _, _, tipo in norm if pid != "IDLE"]
         procesos_unicos = list(dict.fromkeys(procesos_unicos))
         y_positions = {pid: i for i, pid in enumerate(procesos_unicos)}
@@ -155,21 +195,29 @@ class AlgorithmScreen(ctk.CTkFrame):
                 color = "lightgray"
                 hatch = None
                 y = -1
+                alpha = 0.7
             elif tipo == "BLOCK":
-                color = "black"
-                hatch = "//"
+                color = "darkred"
+                hatch = "///"
                 y = y_positions.get(pid, 0)
-            else:
+                alpha = 0.8
+            else:  # CPU
                 if pid not in colors:
                     colors[pid] = color_palette(len(colors))
                 color = colors[pid]
                 hatch = None
                 y = y_positions.get(pid, 0)
+                alpha = 1.0
 
-            ax.barh(y, end - start, left=start, height=0.5, color=color, edgecolor='black', hatch=hatch)
+            ax.barh(y, end - start, left=start, height=0.6, color=color, 
+                   edgecolor='black', hatch=hatch, alpha=alpha)
+            
             if tipo != "IDLE":
-                ax.text((start + end) / 2, y, str(pid), ha='center', va='center',
-                        fontsize=8, color="white" if tipo == "BLOCK" else "black")
+                # Mostrar el PID y el tipo de ráfaga
+                text = f"{pid}\n({tipo})" if tipo == "BLOCK" else str(pid)
+                ax.text((start + end) / 2, y, text, ha='center', va='center',
+                        fontsize=7, color="white" if tipo == "BLOCK" else "black",
+                        weight="bold" if tipo == "BLOCK" else "normal")
 
         if procesos_unicos:
             ax.set_yticks(list(y_positions.values()))
@@ -179,16 +227,114 @@ class AlgorithmScreen(ctk.CTkFrame):
 
         if norm:
             max_time = max(end for _, _, end, _ in norm)
+            
+            # Mostrar TODOS los ticks del 0 al tiempo máximo
             ax.set_xticks(range(0, max_time + 1))
             ax.set_xlim(0, max_time)
         ax.set_xlabel("Tiempo")
         ax.set_ylabel("Procesos")
         ax.set_title(f"Diagrama de Gantt - {algo}")
         ax.grid(True, axis='x', linestyle='--', alpha=0.6)
+        
+        # Agregar leyenda explicativa
+        legend_elements = [
+            plt.Rectangle((0,0),1,1, facecolor='lightblue', edgecolor='black', label='CPU'),
+            plt.Rectangle((0,0),1,1, facecolor='darkred', edgecolor='black', hatch='///', label='Bloqueo (E/S)'),
+            plt.Rectangle((0,0),1,1, facecolor='lightgray', edgecolor='black', alpha=0.7, label='IDLE')
+        ]
+        ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
 
+        # Ajustar el layout para mejor uso del espacio
+        plt.tight_layout()
+        
         canvas = FigureCanvasTkAgg(fig, master=self.frame_gantt)
         canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True)
+        
+        # Almacenar la figura para exportación
+        self.current_fig = fig
+        
+        # Configurar scroll horizontal si es necesario
+        if fig_width > 15:
+            # Para gráficos muy anchos, permitir scroll horizontal
+            canvas.get_tk_widget().configure(scrollregion=canvas.get_tk_widget().bbox("all"))
+
+    def _export_png(self):
+        """Exporta el gráfico actual como PNG."""
+        if self.current_fig is None:
+            messagebox.showwarning("Advertencia", "No hay gráfico para exportar. Ejecute un algoritmo primero.")
+            return
+        
+        try:
+            from tkinter import filedialog
+            import os
+            from datetime import datetime
+            
+            # Generar nombre de archivo con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"gantt_{self.current_algorithm}_{timestamp}.png"
+            
+            # Abrir diálogo para seleccionar ubicación
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".png",
+                filetypes=[("PNG files", "*.png"), ("All files", "*.*")],
+                initialfile=default_filename,
+                title="Guardar gráfico como PNG"
+            )
+            
+            if file_path:
+                # Exportar con alta resolución
+                self.current_fig.savefig(file_path, dpi=300, bbox_inches='tight', 
+                                       facecolor='white', edgecolor='none')
+                messagebox.showinfo("Éxito", f"Gráfico exportado exitosamente:\n{file_path}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar el gráfico:\n{str(e)}")
+
+    def _export_excel(self):
+        """Exporta los resultados actuales a un archivo Excel."""
+        if (self.current_gantt is None or self.current_algorithm is None or 
+            self.current_metricas is None):
+            messagebox.showwarning("Advertencia", "No hay datos para exportar. Ejecute un algoritmo primero.")
+            return
+        
+        try:
+            from tkinter import filedialog
+            import os
+            from datetime import datetime
+            
+            # Generar nombre de archivo con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"resultados_{self.current_algorithm}_{timestamp}.xlsx"
+            
+            # Abrir diálogo para seleccionar ubicación
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                initialfile=default_filename,
+                title="Guardar resultados como Excel"
+            )
+            
+            if file_path:
+                # Crear archivo temporal
+                temp_file = exportar_a_excel(
+                    procesos_data=self.procesos_data,
+                    algoritmo=self.current_algorithm,
+                    gantt_data=self.current_gantt,
+                    metricas=self.current_metricas,
+                    trm=self.current_trm,
+                    tem=self.current_tem,
+                    quantum=self.current_quantum
+                )
+                
+                # Mover el archivo a la ubicación seleccionada
+                import shutil
+                shutil.move(temp_file, file_path)
+                
+                messagebox.showinfo("Éxito", f"Resultados exportados exitosamente a:\n{file_path}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar a Excel:\n{str(e)}")
 
     def _salir(self):
         self.master.destroy()
