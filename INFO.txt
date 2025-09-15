@@ -1,0 +1,30 @@
+Bienvenido al instalador de TimeSlice
+
+TimeSlice es un simulador completo de algoritmos de planificación de CPU que incluye:
+
+• FIFO (First In, First Out)
+• SJF (Shortest Job First) 
+• SRTF (Shortest Remaining Time First)
+• Round Robin
+
+CARACTERÍSTICAS:
+• Interfaz gráfica moderna y fácil de usar
+• Visualización con diagramas de Gantt
+• Cálculo automático de métricas de rendimiento
+• Exportación de resultados a Excel
+• Sistema de historial de simulaciones
+• Versiones con y sin bloqueos de procesos
+
+REQUISITOS DEL SISTEMA:
+• Windows 7 o superior
+• 50 MB de espacio libre en disco
+• No requiere instalación de Python
+
+AUTOR: Federico Gabriel Arena
+VERSIÓN: 1.0.0
+LICENCIA: MIT
+
+Para más información visita:
+https://github.com/Federixco/GanddOperativos
+
+¡Gracias por usar GanddOperativos!

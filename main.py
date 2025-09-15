@@ -37,7 +37,7 @@ if __name__ == "__main__":
     ctk.set_default_color_theme("blue")  # Tema azul
 
     root = ctk.CTk()
-    root.title("Simulador de Planificación de CPU")
+    root.title("TimeSlice - Simulador de Planificación de CPU")
     root.geometry("800x600")
 
     # Pantalla inicial

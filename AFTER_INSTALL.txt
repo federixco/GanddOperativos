@@ -1,0 +1,27 @@
+¡Instalación completada exitosamente!
+
+TimeSlice se ha instalado correctamente en su sistema.
+
+UBICACIÓN DE INSTALACIÓN:
+{app}
+
+ACCESOS DIRECTOS CREADOS:
+• Menú Inicio: Programas > TimeSlice
+• Escritorio: TimeSlice (si se seleccionó durante la instalación)
+
+CÓMO USAR EL PROGRAMA:
+1. Haga doble clic en el acceso directo de TimeSlice
+2. O navegue a la carpeta de instalación y ejecute TimeSlice.exe
+3. Siga las instrucciones en pantalla para crear y simular procesos
+
+DESINSTALACIÓN:
+Para desinstalar el programa:
+• Use "Agregar o quitar programas" en Windows
+• O ejecute "Desinstalar TimeSlice" desde el menú inicio
+
+SOPORTE:
+Si tiene problemas o sugerencias:
+• GitHub: https://github.com/Federixco/GanddOperativos
+• Crear un issue en el repositorio
+
+¡Disfrute usando TimeSlice para aprender sobre planificación de CPU!

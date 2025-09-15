@@ -90,5 +90,65 @@
                 ]
             }
         ]
+    },
+    {
+        "nombre": "Punto 3 GUIA 2",
+        "fecha": "2025-09-15T03:07:25",
+        "procesos": [
+            {
+                "nombre": "P1",
+                "arrival": 0,
+                "bursts": [
+                    5,
+                    22,
+                    5
+                ]
+            },
+            {
+                "nombre": "P2",
+                "arrival": 0,
+                "bursts": [
+                    2,
+                    10,
+                    9
+                ]
+            },
+            {
+                "nombre": "P3",
+                "arrival": 0,
+                "bursts": [
+                    6,
+                    101,
+                    5,
+                    10,
+                    1
+                ]
+            },
+            {
+                "nombre": "P4",
+                "arrival": 0,
+                "bursts": [
+                    7,
+                    61,
+                    8
+                ]
+            },
+            {
+                "nombre": "P5",
+                "arrival": 1,
+                "bursts": [
+                    13
+                ]
+            },
+            {
+                "nombre": "P6",
+                "arrival": 2,
+                "bursts": [
+                    9,
+                    252,
+                    8
+                ]
+            }
+        ]
     }
 ]
