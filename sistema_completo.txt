@@ -85,7 +85,7 @@ if __name__ == "__main__":
     ctk.set_default_color_theme("blue")  # Tema azul
 
     root = ctk.CTk()
-    root.title("Simulador de Planificación de CPU")
+    root.title("TimeSlice - Simulador de Planificación de CPU")
     root.geometry("800x600")
 
     # Pantalla inicial
@@ -1113,6 +1113,8 @@ from tkinter import messagebox, ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
+from utils import historial
+
 from models.process import Process
 # Algoritmos sin bloqueos
 from algoritmos.fifo import fifo
@@ -1126,6 +1128,7 @@ from algoritmos.srtf_blocking import srtf_blocking
 from algoritmos.round_robin_blocking import round_robin_blocking
 
 from utils.metricas import calcular_metricas
+from utils.excel_export import exportar_a_excel
 
 
 class AlgorithmScreen(ctk.CTkFrame):
@@ -1138,6 +1141,22 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.current_gantt = None
         self.current_algorithm = None
         self.current_fig = None
+        self.current_metricas = None
+        self.current_trm = None
+        self.current_tem = None
+        self.current_quantum = None
+        
+        # Variables para el zoom
+        self.zoom_level = 1.0
+        self.original_xlim = None
+        self.original_ylim = None
+        self.current_ax = None
+        self.current_canvas = None
+        
+        # Variables para el pan (arrastrar)
+        self.pan_start_x = None
+        self.pan_start_y = None
+        self.is_panning = False
 
         # --- Selección de algoritmo ---
         self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
@@ -1158,12 +1177,49 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.btn_export = ctk.CTkButton(btn_frame, text="Exportar PNG", command=self._export_png, 
                                       fg_color="green", hover_color="#006600")
         self.btn_export.pack(side="left", padx=5)
+        self.btn_export_excel = ctk.CTkButton(btn_frame, text="Exportar Excel", command=self._export_excel, 
+                                            fg_color="purple", hover_color="#660066")
+        self.btn_export_excel.pack(side="left", padx=5)
         self.btn_new = ctk.CTkButton(btn_frame, text="Nuevo ejercicio", command=self.volver_inicio)
         self.btn_new.pack(side="left", padx=5)
         self.btn_exit = ctk.CTkButton(
             btn_frame, text="Salir", fg_color="red", hover_color="#aa0000", command=self._salir
         )
         self.btn_exit.pack(side="left", padx=5)
+
+        # --- Controles de zoom ---
+        zoom_frame = ctk.CTkFrame(self)
+        zoom_frame.pack(pady=5)
+        
+        self.label_zoom = ctk.CTkLabel(zoom_frame, text="Zoom:", font=("Arial", 12, "bold"))
+        self.label_zoom.pack(side="left", padx=5)
+        
+        self.btn_zoom_out = ctk.CTkButton(zoom_frame, text="−", command=self._zoom_out, 
+                                        width=30, height=30, font=("Arial", 16, "bold"))
+        self.btn_zoom_out.pack(side="left", padx=2)
+        
+        self.label_zoom_level = ctk.CTkLabel(zoom_frame, text="100%", font=("Arial", 12))
+        self.label_zoom_level.pack(side="left", padx=5)
+        
+        self.btn_zoom_in = ctk.CTkButton(zoom_frame, text="+", command=self._zoom_in, 
+                                       width=30, height=30, font=("Arial", 16, "bold"))
+        self.btn_zoom_in.pack(side="left", padx=2)
+        
+        self.btn_zoom_reset = ctk.CTkButton(zoom_frame, text="Reset", command=self._zoom_reset, 
+                                          width=50, height=30, fg_color="orange", hover_color="#cc6600")
+        self.btn_zoom_reset.pack(side="left", padx=5)
+        
+        self.btn_open_window = ctk.CTkButton(zoom_frame, text="Abrir en Ventana", 
+                                           command=self._open_in_window, 
+                                           width=120, height=30, 
+                                           fg_color="purple", hover_color="#660066")
+        self.btn_open_window.pack(side="left", padx=5)
+        
+        # Etiqueta informativa
+        self.label_zoom_info = ctk.CTkLabel(zoom_frame, 
+                                          text="💡 Rueda: Zoom | Click+Arrastrar: Mover", 
+                                          font=("Arial", 10), text_color="gray")
+        self.label_zoom_info.pack(side="left", padx=10)
 
         # --- Campo quantum (solo si RR) ---
         self.frame_quantum = ctk.CTkFrame(self)
@@ -1237,6 +1293,15 @@ class AlgorithmScreen(ctk.CTkFrame):
         # Almacenar datos del gráfico para exportación
         self.current_gantt = gantt
         self.current_algorithm = algo
+        self.current_metricas = metricas
+        self.current_trm = trm
+        self.current_tem = tem
+        
+        # Obtener quantum si es Round Robin
+        if algo == "Round Robin":
+            self.current_quantum = self._get_quantum()
+        else:
+            self.current_quantum = None
         
         # Mostrar gráfico
         self._mostrar_gantt_embebido(gantt, algo)
@@ -1338,17 +1403,34 @@ class AlgorithmScreen(ctk.CTkFrame):
         # Ajustar el layout para mejor uso del espacio
         plt.tight_layout()
         
+        # Crear canvas directamente en el frame
         canvas = FigureCanvasTkAgg(fig, master=self.frame_gantt)
         canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True)
         
-        # Almacenar la figura para exportación
+        # Almacenar la figura y canvas para zoom
         self.current_fig = fig
+        self.current_ax = ax
+        self.current_canvas = canvas
         
-        # Configurar scroll horizontal si es necesario
-        if fig_width > 15:
-            # Para gráficos muy anchos, permitir scroll horizontal
-            canvas.get_tk_widget().configure(scrollregion=canvas.get_tk_widget().bbox("all"))
+        # Guardar los límites originales para el zoom
+        self.original_xlim = ax.get_xlim()
+        self.original_ylim = ax.get_ylim()
+        
+        # Resetear el nivel de zoom
+        self.zoom_level = 1.0
+        self._update_zoom_label()
+        
+        # Variables para el pan (arrastrar)
+        self.pan_start_x = None
+        self.pan_start_y = None
+        self.is_panning = False
+        
+        # Configurar eventos de mouse
+        canvas.mpl_connect("scroll_event", self._on_mouse_wheel)
+        canvas.mpl_connect("button_press_event", self._on_mouse_press)
+        canvas.mpl_connect("button_release_event", self._on_mouse_release)
+        canvas.mpl_connect("motion_notify_event", self._on_mouse_motion)
 
     def _export_png(self):
         """Exporta el gráfico actual como PNG."""
@@ -1382,143 +1464,258 @@ class AlgorithmScreen(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("Error", f"Error al exportar el gráfico:\n{str(e)}")
 
+    def _export_excel(self):
+        """Exporta los resultados actuales a un archivo Excel."""
+        if (self.current_gantt is None or self.current_algorithm is None or 
+            self.current_metricas is None):
+            messagebox.showwarning("Advertencia", "No hay datos para exportar. Ejecute un algoritmo primero.")
+            return
+        
+        try:
+            from tkinter import filedialog
+            import os
+            from datetime import datetime
+            
+            # Generar nombre de archivo con timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            default_filename = f"resultados_{self.current_algorithm}_{timestamp}.xlsx"
+            
+            # Abrir diálogo para seleccionar ubicación
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")],
+                initialfile=default_filename,
+                title="Guardar resultados como Excel"
+            )
+            
+            if file_path:
+                # Crear archivo temporal
+                temp_file = exportar_a_excel(
+                    procesos_data=self.procesos_data,
+                    algoritmo=self.current_algorithm,
+                    gantt_data=self.current_gantt,
+                    metricas=self.current_metricas,
+                    trm=self.current_trm,
+                    tem=self.current_tem,
+                    quantum=self.current_quantum
+                )
+                
+                # Mover el archivo a la ubicación seleccionada
+                import shutil
+                shutil.move(temp_file, file_path)
+                
+                messagebox.showinfo("Éxito", f"Resultados exportados exitosamente a:\n{file_path}")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al exportar a Excel:\n{str(e)}")
+
     def _salir(self):
         self.master.destroy()
 
-...-------------------...
-Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\algorithm_screen_backup.py
-
-...-------------------...
-import customtkinter as ctk
-from tkinter import messagebox, ttk
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import matplotlib.pyplot as plt
-
-from models.process import Process
-# Algoritmos sin bloqueos
-from algoritmos.fifo import fifo
-from algoritmos.sjf import sjf
-from algoritmos.srtf import srtf
-from algoritmos.roundrobin import round_robin
-# Algoritmos con bloqueos
-from algoritmos.fifo_blocking import fifo_blocking
-from algoritmos.sjf_blocking import sjf_blocking
-from algoritmos.srtf_blocking import srtf_blocking
-from algoritmos.round_robin_blocking import round_robin_blocking
-
-from utils.metricas import calcular_metricas
-
-
-class AlgorithmScreen(ctk.CTkFrame):
-    def __init__(self, master, procesos_data, volver_inicio):
-        super().__init__(master)
-        self.procesos_data = procesos_data
-        self.volver_inicio = volver_inicio
-
-        # --- Selección de algoritmo ---
-        self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
-        self.label_title.pack(pady=10)
-
-        self.algoritmos = ["FIFO", "SJF", "SRTF", "Round Robin"]
-        self.selected_algo = ctk.StringVar(value=self.algoritmos[0])
-        self.option_menu = ctk.CTkOptionMenu(
-            self, values=self.algoritmos, variable=self.selected_algo, command=self._on_algo_change
-        )
-        self.option_menu.pack(pady=5)
-
-        # --- Botones de control ---
-        btn_frame = ctk.CTkFrame(self)
-        btn_frame.pack(pady=10)
-        self.btn_run = ctk.CTkButton(btn_frame, text="Ejecutar", command=self._run_algorithm)
-        self.btn_run.pack(side="left", padx=5)
-        self.btn_new = ctk.CTkButton(btn_frame, text="Nuevo ejercicio", command=self.volver_inicio)
-        self.btn_new.pack(side="left", padx=5)
-        self.btn_exit = ctk.CTkButton(
-            btn_frame, text="Salir", fg_color="red", hover_color="#aa0000", command=self._salir
-        )
-        self.btn_exit.pack(side="left", padx=5)
-
-        # --- Campo quantum (solo si RR) ---
-        self.frame_quantum = ctk.CTkFrame(self)
-        self.label_quantum = ctk.CTkLabel(self.frame_quantum, text="Quantum:")
-        self.label_quantum.pack(side="left", padx=5)
-        self.entry_quantum = ctk.CTkEntry(self.frame_quantum, placeholder_text="Ej: 2", width=60)
-        self.entry_quantum.pack(side="left", padx=5)
-
-        # --- Tabla BCP ---
-        self.tree = ttk.Treeview(self, columns=("PID", "Llegada", "CPU", "TR", "TE"), show="headings", height=8)
-        for col in ("PID", "Llegada", "CPU", "TR", "TE"):
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=80, anchor="center")
-        self.tree.pack(pady=10, fill="x")
-
-        # --- Label promedios ---
-        self.label_promedios = ctk.CTkLabel(self, text="TRM: -    |    TEM: -", font=("Arial", 14))
-        self.label_promedios.pack(pady=5)
-
-        # --- Frame gráfico ---
-        self.frame_gantt = ctk.CTkFrame(self)
-        self.frame_gantt.pack(pady=10, fill="both", expand=True)
-
-    def _on_algo_change(self, value):
-        if value == "Round Robin":
-            self.frame_quantum.pack(before=self.tree, pady=5)
-        else:
-            self.frame_quantum.pack_forget()
-
-    def _run_algorithm(self):
-        procesos = [Process(p["pid"], p["arrival_time"], p["bursts"]) for p in self.procesos_data]
-        algo = self.selected_algo.get()
-
-        try:
-            if algo == "FIFO":
-                gantt, result = fifo_blocking(procesos)
-            elif algo == "SJF":
-                gantt, result = sjf_blocking(procesos)
-            elif algo == "SRTF":
-                gantt, result = srtf_blocking(procesos)
-            elif algo == "Round Robin":
-                quantum = self._get_quantum()
-                if quantum is None:
-                    return
-                gantt, result = round_robin_blocking(procesos, quantum)
-        except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un error al ejecutar: {e}")
+    def _zoom_in(self):
+        """Aumenta el nivel de zoom del gráfico."""
+        if self.current_ax is None:
             return
+        
+        self.zoom_level *= 1.2
+        self._apply_zoom()
+        self._update_zoom_label()
 
-        # Calcular métricas
-        metricas, trm, tem = calcular_metricas(result)
+    def _zoom_out(self):
+        """Disminuye el nivel de zoom del gráfico."""
+        if self.current_ax is None:
+            return
+        
+        self.zoom_level /= 1.2
+        self._apply_zoom()
+        self._update_zoom_label()
 
-        # Actualizar tabla
-        for row in self.tree.get_children():
-            self.tree.delete(row)
-        for m in metricas:
-            self.tree.insert("", "end", values=(m["PID"], m["Llegada"], m["CPU"], m["TR"], m["TE"]))
+    def _zoom_reset(self):
+        """Resetea el zoom a la vista original."""
+        if self.current_ax is None or self.original_xlim is None or self.original_ylim is None:
+            return
+        
+        self.zoom_level = 1.0
+        self.current_ax.set_xlim(self.original_xlim)
+        self.current_ax.set_ylim(self.original_ylim)
+        self.current_canvas.draw()
+        self._update_zoom_label()
+        
+        # Resetear variables de pan
+        self.is_panning = False
+        self.pan_start_x = None
+        self.pan_start_y = None
 
-        # Actualizar promedios
-        self.label_promedios.configure(
-            text=f"TRM (Tiempo de Respuesta Medio): {trm:.2f}    |    TEM (Tiempo de Espera Medio): {tem:.2f}"
-        )
+    def _apply_zoom(self):
+        """Aplica el nivel de zoom actual al gráfico."""
+        if self.current_ax is None or self.original_xlim is None or self.original_ylim is None:
+            return
+        
+        # Calcular los nuevos límites basados en el zoom
+        x_center = (self.original_xlim[0] + self.original_xlim[1]) / 2
+        y_center = (self.original_ylim[0] + self.original_ylim[1]) / 2
+        
+        x_range = (self.original_xlim[1] - self.original_xlim[0]) / self.zoom_level
+        y_range = (self.original_ylim[1] - self.original_ylim[0]) / self.zoom_level
+        
+        new_xlim = (x_center - x_range/2, x_center + x_range/2)
+        new_ylim = (y_center - y_range/2, y_center + y_range/2)
+        
+        self.current_ax.set_xlim(new_xlim)
+        self.current_ax.set_ylim(new_ylim)
+        self.current_canvas.draw()
 
-        # Mostrar gráfico
-        self._mostrar_gantt_embebido(gantt, algo)
+    def _update_zoom_label(self):
+        """Actualiza la etiqueta que muestra el nivel de zoom actual."""
+        self.label_zoom_level.configure(text=f"{int(self.zoom_level * 100)}%")
 
-    def _get_quantum(self):
-        try:
-            quantum = int(self.entry_quantum.get())
-            if quantum <= 0:
-                raise ValueError
-            return quantum
-        except ValueError:
-            messagebox.showerror("Error", "Ingrese un quantum válido (> 0)")
-            return None
+    def _on_mouse_wheel(self, event):
+        """Maneja el evento de la rueda del mouse para zoom."""
+        if self.current_ax is None:
+            return
+        
+        # Determinar si hacer zoom in o out
+        if event.delta > 0:
+            self._zoom_in()
+        else:
+            self._zoom_out()
 
-    def _mostrar_gantt_embebido(self, gantt_chart, algo):
-        for widget in self.frame_gantt.winfo_children():
-            widget.destroy()
+    def _on_mouse_press(self, event):
+        """Maneja el evento de presionar el botón del mouse para iniciar pan."""
+        if self.current_ax is None or event.inaxes != self.current_ax:
+            return
+        
+        if event.button == 1:  # Botón izquierdo del mouse
+            self.is_panning = True
+            self.pan_start_x = event.xdata
+            self.pan_start_y = event.ydata
+            # Cambiar el cursor para indicar que se puede arrastrar
+            self.current_canvas.get_tk_widget().configure(cursor="fleur")
 
+    def _on_mouse_release(self, event):
+        """Maneja el evento de soltar el botón del mouse para terminar pan."""
+        if self.current_ax is None:
+            return
+        
+        if event.button == 1:  # Botón izquierdo del mouse
+            self.is_panning = False
+            self.pan_start_x = None
+            self.pan_start_y = None
+            # Restaurar el cursor normal
+            self.current_canvas.get_tk_widget().configure(cursor="")
+
+    def _on_mouse_motion(self, event):
+        """Maneja el movimiento del mouse para pan."""
+        if (self.current_ax is None or not self.is_panning or 
+            event.inaxes != self.current_ax or 
+            self.pan_start_x is None or self.pan_start_y is None):
+            return
+        
+        # Calcular el desplazamiento
+        dx = event.xdata - self.pan_start_x
+        dy = event.ydata - self.pan_start_y
+        
+        # Obtener los límites actuales
+        xlim = self.current_ax.get_xlim()
+        ylim = self.current_ax.get_ylim()
+        
+        # Aplicar el desplazamiento
+        new_xlim = (xlim[0] - dx, xlim[1] - dx)
+        new_ylim = (ylim[0] - dy, ylim[1] - dy)
+        
+        # Actualizar los límites
+        self.current_ax.set_xlim(new_xlim)
+        self.current_ax.set_ylim(new_ylim)
+        self.current_canvas.draw()
+        
+        # Actualizar la posición de inicio para el siguiente movimiento
+        self.pan_start_x = event.xdata
+        self.pan_start_y = event.ydata
+
+    def _open_in_window(self):
+        """Abre el gráfico actual en una ventana separada."""
+        if self.current_gantt is None or self.current_algorithm is None:
+            messagebox.showwarning("Advertencia", "No hay gráfico para abrir. Ejecute un algoritmo primero.")
+            return
+        
+        # Crear y mostrar la ventana separada
+        GanttWindow(self.current_gantt, self.current_algorithm)
+
+
+class GanttWindow:
+    """Ventana separada para mostrar el diagrama de Gantt con zoom y pan."""
+    
+    def __init__(self, gantt_chart, algorithm):
+        self.gantt_chart = gantt_chart
+        self.algorithm = algorithm
+        
+        # Crear ventana
+        self.window = ctk.CTkToplevel()
+        self.window.title(f"Diagrama de Gantt - {algorithm}")
+        self.window.geometry("1200x800")
+        self.window.resizable(True, True)
+        
+        # Variables para zoom y pan
+        self.zoom_level = 1.0
+        self.original_xlim = None
+        self.original_ylim = None
+        self.current_ax = None
+        self.current_canvas = None
+        self.pan_start_x = None
+        self.pan_start_y = None
+        self.is_panning = False
+        
+        self._create_interface()
+        self._create_gantt()
+        
+        # Centrar la ventana
+        self.window.transient()
+        self.window.grab_set()
+        
+    def _create_interface(self):
+        """Crea la interfaz de la ventana."""
+        # Frame de controles
+        control_frame = ctk.CTkFrame(self.window)
+        control_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Título
+        title_label = ctk.CTkLabel(control_frame, text=f"Diagrama de Gantt - {self.algorithm}", 
+                                 font=("Arial", 16, "bold"))
+        title_label.pack(side="left", padx=10)
+        
+        # Controles de zoom
+        zoom_frame = ctk.CTkFrame(control_frame)
+        zoom_frame.pack(side="right", padx=10)
+        
+        ctk.CTkLabel(zoom_frame, text="Zoom:", font=("Arial", 12, "bold")).pack(side="left", padx=5)
+        
+        btn_zoom_out = ctk.CTkButton(zoom_frame, text="−", command=self._zoom_out, 
+                                   width=30, height=30, font=("Arial", 16, "bold"))
+        btn_zoom_out.pack(side="left", padx=2)
+        
+        self.label_zoom_level = ctk.CTkLabel(zoom_frame, text="100%", font=("Arial", 12))
+        self.label_zoom_level.pack(side="left", padx=5)
+        
+        btn_zoom_in = ctk.CTkButton(zoom_frame, text="+", command=self._zoom_in, 
+                                  width=30, height=30, font=("Arial", 16, "bold"))
+        btn_zoom_in.pack(side="left", padx=2)
+        
+        btn_zoom_reset = ctk.CTkButton(zoom_frame, text="Reset", command=self._zoom_reset, 
+                                     width=50, height=30, fg_color="orange", hover_color="#cc6600")
+        btn_zoom_reset.pack(side="left", padx=5)
+        
+        # Frame para el gráfico
+        self.graph_frame = ctk.CTkFrame(self.window)
+        self.graph_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+    def _create_gantt(self):
+        """Crea el diagrama de Gantt en la ventana."""
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        
+        # Normalizar datos del gantt
         norm = []
-        for seg in gantt_chart:
+        for seg in self.gantt_chart:
             if len(seg) == 3:
                 pid, start, end = seg
                 tipo = "CPU" if pid != "IDLE" else "IDLE"
@@ -1526,7 +1723,16 @@ class AlgorithmScreen(ctk.CTkFrame):
             elif len(seg) == 4:
                 norm.append(seg)
 
-        fig, ax = plt.subplots(figsize=(8, 3))
+        # Calcular dimensiones
+        num_procesos = len(set(pid for pid, _, _, tipo in norm if pid != "IDLE"))
+        max_time = max(end for _, _, end, _ in norm) if norm else 1
+        
+        fig_width = max(15, max_time * 0.25)
+        fig_height = max(6, num_procesos * 0.8)
+        
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        
+        # Procesar datos
         procesos_unicos = [pid for pid, _, _, tipo in norm if pid != "IDLE"]
         procesos_unicos = list(dict.fromkeys(procesos_unicos))
         y_positions = {pid: i for i, pid in enumerate(procesos_unicos)}
@@ -1534,27 +1740,36 @@ class AlgorithmScreen(ctk.CTkFrame):
         colors = {}
         color_palette = plt.cm.get_cmap("tab20", len(procesos_unicos) + 1)
 
+        # Dibujar barras
         for pid, start, end, tipo in norm:
             if tipo == "IDLE":
                 color = "lightgray"
                 hatch = None
                 y = -1
+                alpha = 0.7
             elif tipo == "BLOCK":
-                color = "black"
-                hatch = "//"
+                color = "darkred"
+                hatch = "///"
                 y = y_positions.get(pid, 0)
-            else:
+                alpha = 0.8
+            else:  # CPU
                 if pid not in colors:
                     colors[pid] = color_palette(len(colors))
                 color = colors[pid]
                 hatch = None
                 y = y_positions.get(pid, 0)
+                alpha = 1.0
 
-            ax.barh(y, end - start, left=start, height=0.5, color=color, edgecolor='black', hatch=hatch)
+            ax.barh(y, end - start, left=start, height=0.6, color=color, 
+                   edgecolor='black', hatch=hatch, alpha=alpha)
+            
             if tipo != "IDLE":
-                ax.text((start + end) / 2, y, str(pid), ha='center', va='center',
-                        fontsize=8, color="white" if tipo == "BLOCK" else "black")
+                text = f"{pid}\n({tipo})" if tipo == "BLOCK" else str(pid)
+                ax.text((start + end) / 2, y, text, ha='center', va='center',
+                        fontsize=7, color="white" if tipo == "BLOCK" else "black",
+                        weight="bold" if tipo == "BLOCK" else "normal")
 
+        # Configurar ejes
         if procesos_unicos:
             ax.set_yticks(list(y_positions.values()))
             ax.set_yticklabels(list(y_positions.keys()))
@@ -1565,24 +1780,141 @@ class AlgorithmScreen(ctk.CTkFrame):
             max_time = max(end for _, _, end, _ in norm)
             ax.set_xticks(range(0, max_time + 1))
             ax.set_xlim(0, max_time)
+            
         ax.set_xlabel("Tiempo")
         ax.set_ylabel("Procesos")
-        ax.set_title(f"Diagrama de Gantt - {algo}")
+        ax.set_title(f"Diagrama de Gantt - {self.algorithm}")
         ax.grid(True, axis='x', linestyle='--', alpha=0.6)
+        
+        # Leyenda
+        legend_elements = [
+            plt.Rectangle((0,0),1,1, facecolor='lightblue', edgecolor='black', label='CPU'),
+            plt.Rectangle((0,0),1,1, facecolor='darkred', edgecolor='black', hatch='///', label='Bloqueo (E/S)'),
+            plt.Rectangle((0,0),1,1, facecolor='lightgray', edgecolor='black', alpha=0.7, label='IDLE')
+        ]
+        ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
 
-        canvas = FigureCanvasTkAgg(fig, master=self.frame_gantt)
+        plt.tight_layout()
+        
+        # Crear canvas
+        canvas = FigureCanvasTkAgg(fig, master=self.graph_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill="both", expand=True)
+        
+        # Almacenar referencias
+        self.current_fig = fig
+        self.current_ax = ax
+        self.current_canvas = canvas
+        self.original_xlim = ax.get_xlim()
+        self.original_ylim = ax.get_ylim()
+        
+        # Configurar eventos de mouse
+        canvas.mpl_connect("scroll_event", self._on_mouse_wheel)
+        canvas.mpl_connect("button_press_event", self._on_mouse_press)
+        canvas.mpl_connect("button_release_event", self._on_mouse_release)
+        canvas.mpl_connect("motion_notify_event", self._on_mouse_motion)
+        
+    def _zoom_in(self):
+        """Aumenta el nivel de zoom del gráfico."""
+        if self.current_ax is None:
+            return
+        self.zoom_level *= 1.2
+        self._apply_zoom()
+        self._update_zoom_label()
 
-    def _salir(self):
-        self.master.destroy()
+    def _zoom_out(self):
+        """Disminuye el nivel de zoom del gráfico."""
+        if self.current_ax is None:
+            return
+        self.zoom_level /= 1.2
+        self._apply_zoom()
+        self._update_zoom_label()
+
+    def _zoom_reset(self):
+        """Resetea el zoom a la vista original."""
+        if self.current_ax is None or self.original_xlim is None or self.original_ylim is None:
+            return
+        self.zoom_level = 1.0
+        self.current_ax.set_xlim(self.original_xlim)
+        self.current_ax.set_ylim(self.original_ylim)
+        self.current_canvas.draw()
+        self._update_zoom_label()
+        self.is_panning = False
+        self.pan_start_x = None
+        self.pan_start_y = None
+
+    def _apply_zoom(self):
+        """Aplica el nivel de zoom actual al gráfico."""
+        if self.current_ax is None or self.original_xlim is None or self.original_ylim is None:
+            return
+        x_center = (self.original_xlim[0] + self.original_xlim[1]) / 2
+        y_center = (self.original_ylim[0] + self.original_ylim[1]) / 2
+        x_range = (self.original_xlim[1] - self.original_xlim[0]) / self.zoom_level
+        y_range = (self.original_ylim[1] - self.original_ylim[0]) / self.zoom_level
+        new_xlim = (x_center - x_range/2, x_center + x_range/2)
+        new_ylim = (y_center - y_range/2, y_center + y_range/2)
+        self.current_ax.set_xlim(new_xlim)
+        self.current_ax.set_ylim(new_ylim)
+        self.current_canvas.draw()
+
+    def _update_zoom_label(self):
+        """Actualiza la etiqueta que muestra el nivel de zoom actual."""
+        self.label_zoom_level.configure(text=f"{int(self.zoom_level * 100)}%")
+
+    def _on_mouse_wheel(self, event):
+        """Maneja el evento de la rueda del mouse para zoom."""
+        if self.current_ax is None:
+            return
+        if event.delta > 0:
+            self._zoom_in()
+        else:
+            self._zoom_out()
+
+    def _on_mouse_press(self, event):
+        """Maneja el evento de presionar el botón del mouse para iniciar pan."""
+        if self.current_ax is None or event.inaxes != self.current_ax:
+            return
+        if event.button == 1:
+            self.is_panning = True
+            self.pan_start_x = event.xdata
+            self.pan_start_y = event.ydata
+            self.current_canvas.get_tk_widget().configure(cursor="fleur")
+
+    def _on_mouse_release(self, event):
+        """Maneja el evento de soltar el botón del mouse para terminar pan."""
+        if self.current_ax is None:
+            return
+        if event.button == 1:
+            self.is_panning = False
+            self.pan_start_x = None
+            self.pan_start_y = None
+            self.current_canvas.get_tk_widget().configure(cursor="")
+
+    def _on_mouse_motion(self, event):
+        """Maneja el movimiento del mouse para pan."""
+        if (self.current_ax is None or not self.is_panning or 
+            event.inaxes != self.current_ax or 
+            self.pan_start_x is None or self.pan_start_y is None):
+            return
+        dx = event.xdata - self.pan_start_x
+        dy = event.ydata - self.pan_start_y
+        xlim = self.current_ax.get_xlim()
+        ylim = self.current_ax.get_ylim()
+        new_xlim = (xlim[0] - dx, xlim[1] - dx)
+        new_ylim = (ylim[0] - dy, ylim[1] - dy)
+        self.current_ax.set_xlim(new_xlim)
+        self.current_ax.set_ylim(new_ylim)
+        self.current_canvas.draw()
+        self.pan_start_x = event.xdata
+        self.pan_start_y = event.ydata
 
 ...-------------------...
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\GUI\data_input_screen.py
 
 ...-------------------...
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
+from utils import historial
 
 class DataInputScreen(ctk.CTkFrame):
     def __init__(self, master, nombres_procesos, on_continue):
@@ -1601,6 +1933,18 @@ class DataInputScreen(ctk.CTkFrame):
         self.scroll_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
         self._build_rows()
+
+        # Botones de historial
+        btn_historial_frame = ctk.CTkFrame(self)
+        btn_historial_frame.pack(pady=10)
+        
+        self.btn_save_config = ctk.CTkButton(btn_historial_frame, text="Guardar configuración", 
+                                           command=self._guardar_configuracion, fg_color="blue", hover_color="#003366")
+        self.btn_save_config.pack(side="left", padx=5)
+        
+        self.btn_load_config = ctk.CTkButton(btn_historial_frame, text="Cargar configuración", 
+                                           command=self._cargar_configuracion, fg_color="orange", hover_color="#cc6600")
+        self.btn_load_config.pack(side="left", padx=5)
 
         self.btn_continue = ctk.CTkButton(self, text="Continuar", command=self._continue_clicked)
         self.btn_continue.pack(pady=20)
@@ -1800,6 +2144,264 @@ class DataInputScreen(ctk.CTkFrame):
             return
 
         self.on_continue(procesos_data)
+
+    def _guardar_configuracion(self):
+        """Guarda la configuración actual de inputs."""
+        # Crear ventana de diálogo para ingresar nombre de
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Guardar configuración")
+        dialog.geometry("400x150")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Centrar la ventana
+        dialog.geometry("+%d+%d" % (self.winfo_rootx() + 50, self.winfo_rooty() + 50))
+        
+        # Frame principal
+        main_frame = ctk.CTkFrame(dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Label y entry para el nombre
+        label_nombre = ctk.CTkLabel(main_frame, text="Nombre de la configuración:", font=("Arial", 12))
+        label_nombre.pack(pady=(0, 10))
+        
+        entry_nombre = ctk.CTkEntry(main_frame, placeholder_text="Ej: Configuración 3 procesos", width=300)
+        entry_nombre.pack(pady=(0, 20))
+        entry_nombre.focus()
+        
+        # Botones
+        btn_frame = ctk.CTkFrame(main_frame)
+        btn_frame.pack()
+        
+        def guardar():
+            nombre = entry_nombre.get().strip()
+            if not nombre:
+                messagebox.showerror("Error", "Debe ingresar un nombre para la configuración")
+                return
+            
+            try:
+                # Recopilar datos actuales
+                config_procesos = []
+                for nombre_proceso in self.nombres_procesos:
+                    process_info = self.process_data[nombre_proceso]
+                    
+                    # Obtener tiempo de llegada
+                    arrival_str = process_info["arrival_entry"].get().strip()
+                    arrival = int(arrival_str) if arrival_str else 0
+                    
+                    # Obtener ráfagas
+                    bursts = []
+                    for burst_info in process_info["burst_entries"]:
+                        duration_str = burst_info["entry"].get().strip()
+                        duration = int(duration_str) if duration_str else 0
+                        bursts.append(duration)
+                    
+                    config_procesos.append({
+                        "nombre": nombre_proceso,
+                        "arrival": arrival,
+                        "bursts": bursts
+                    })
+                
+                # Guardar en historial
+                historial.guardar_input_config(nombre, config_procesos)
+                
+                messagebox.showinfo("Éxito", f"Configuración '{nombre}' guardada exitosamente")
+                dialog.destroy()
+                
+            except ValueError:
+                messagebox.showerror("Error", "Error en los datos. Asegúrese de que todos los valores sean números válidos.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al guardar la configuración: {e}")
+        
+        btn_guardar = ctk.CTkButton(btn_frame, text="Guardar", command=guardar, fg_color="green")
+        btn_guardar.pack(side="left", padx=5)
+        
+        btn_cancelar = ctk.CTkButton(btn_frame, text="Cancelar", command=dialog.destroy)
+        btn_cancelar.pack(side="left", padx=5)
+        
+        # Permitir guardar con Enter
+        entry_nombre.bind("<Return>", lambda e: guardar())
+
+    def _cargar_configuracion(self):
+        """Carga una configuración guardada."""
+        # Obtener lista de configuraciones guardadas
+        configs = historial.listar_input_configs()
+        
+        if not configs:
+            messagebox.showinfo("Información", "No hay configuraciones guardadas")
+            return
+        
+        # Crear ventana de diálogo para seleccionar configuración
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Cargar configuración")
+        dialog.geometry("600x400")
+        dialog.transient(self)
+        dialog.grab_set()
+        
+        # Centrar la ventana
+        dialog.geometry("+%d+%d" % (self.winfo_rootx() + 50, self.winfo_rooty() + 50))
+        
+        # Frame principal
+        main_frame = ctk.CTkFrame(dialog)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Título
+        label_titulo = ctk.CTkLabel(main_frame, text="Seleccionar configuración a cargar:", font=("Arial", 14, "bold"))
+        label_titulo.pack(pady=(0, 10))
+        
+        # Frame para la lista
+        list_frame = ctk.CTkFrame(main_frame)
+        list_frame.pack(fill="both", expand=True, pady=(0, 10))
+        
+        # Crear Treeview para mostrar las configuraciones
+        columns = ("Nombre", "Fecha", "Procesos")
+        tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=10)
+        
+        # Configurar columnas
+        tree.heading("Nombre", text="Nombre")
+        tree.heading("Fecha", text="Fecha")
+        tree.heading("Procesos", text="N° Procesos")
+        
+        tree.column("Nombre", width=300)
+        tree.column("Fecha", width=150)
+        tree.column("Procesos", width=100)
+        
+        # Scrollbar
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Empaquetar
+        tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Llenar la lista
+        for indice, nombre, fecha, num_procesos in configs:
+            # Formatear fecha para mostrar
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(fecha)
+                fecha_formateada = dt.strftime("%d/%m/%Y %H:%M")
+            except:
+                fecha_formateada = fecha
+            
+            tree.insert("", "end", values=(nombre, fecha_formateada, num_procesos), tags=(str(indice),))
+        
+        # Botones
+        btn_frame = ctk.CTkFrame(main_frame)
+        btn_frame.pack()
+        
+        def cargar():
+            seleccion = tree.selection()
+            if not seleccion:
+                messagebox.showwarning("Advertencia", "Seleccione una configuración para cargar")
+                return
+            
+            # Obtener el índice de la configuración seleccionada
+            item = tree.item(seleccion[0])
+            indice = int(item['tags'][0])
+            
+            try:
+                # Cargar la configuración
+                config = historial.cargar_input_config(indice)
+                if config is None:
+                    messagebox.showerror("Error", "No se pudo cargar la configuración seleccionada")
+                    return
+                
+                # Aplicar la configuración
+                self._aplicar_configuracion(config)
+                
+                messagebox.showinfo("Éxito", f"Configuración '{config['nombre']}' cargada exitosamente")
+                dialog.destroy()
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al cargar la configuración: {e}")
+        
+        def eliminar():
+            seleccion = tree.selection()
+            if not seleccion:
+                messagebox.showwarning("Advertencia", "Seleccione una configuración para eliminar")
+                return
+            
+            # Confirmar eliminación
+            if not messagebox.askyesno("Confirmar", "¿Está seguro de que desea eliminar esta configuración?"):
+                return
+            
+            # Obtener el índice de la configuración seleccionada
+            item = tree.item(seleccion[0])
+            indice = int(item['tags'][0])
+            
+            try:
+                # Eliminar la configuración
+                nombre_eliminado = historial.eliminar_input_config(indice)
+                if nombre_eliminado:
+                    # Actualizar la lista
+                    tree.delete(seleccion[0])
+                    messagebox.showinfo("Éxito", f"Configuración '{nombre_eliminado}' eliminada exitosamente")
+                
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al eliminar la configuración: {e}")
+        
+        btn_cargar = ctk.CTkButton(btn_frame, text="Cargar", command=cargar, fg_color="green")
+        btn_cargar.pack(side="left", padx=5)
+        
+        btn_eliminar = ctk.CTkButton(btn_frame, text="Eliminar", command=eliminar, fg_color="red")
+        btn_eliminar.pack(side="left", padx=5)
+        
+        btn_cancelar = ctk.CTkButton(btn_frame, text="Cancelar", command=dialog.destroy)
+        btn_cancelar.pack(side="left", padx=5)
+
+    def _aplicar_configuracion(self, config):
+        """Aplica una configuración cargada a los campos de entrada."""
+        try:
+            # Limpiar todos los campos actuales
+            self._limpiar_campos()
+            
+            # Aplicar los datos de cada proceso
+            for proceso_config in config["procesos"]:
+                nombre_proceso = proceso_config["nombre"]
+                
+                if nombre_proceso in self.process_data:
+                    process_info = self.process_data[nombre_proceso]
+                    
+                    # Aplicar tiempo de llegada
+                    if proceso_config["arrival"] is not None:
+                        process_info["arrival_entry"].delete(0, "end")
+                        process_info["arrival_entry"].insert(0, str(proceso_config["arrival"]))
+                    
+                    # Aplicar ráfagas
+                    bursts = proceso_config["bursts"]
+                    if bursts:
+                        # Limpiar ráfagas existentes
+                        for burst_info in process_info["burst_entries"][:]:
+                            self._remove_burst(nombre_proceso, burst_info["frame"])
+                        
+                        # Añadir ráfagas de la configuración
+                        for i, duration in enumerate(bursts):
+                            # Determinar tipo de ráfaga (alternando CPU y Bloqueo)
+                            burst_type = "CPU" if i % 2 == 0 else "Bloqueo"
+                            self._add_burst(nombre_proceso, burst_type)
+                            
+                            # Establecer el valor
+                            if process_info["burst_entries"]:
+                                last_burst = process_info["burst_entries"][-1]
+                                last_burst["entry"].delete(0, "end")
+                                last_burst["entry"].insert(0, str(duration))
+                        
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al aplicar la configuración: {e}")
+
+    def _limpiar_campos(self):
+        """Limpia todos los campos de entrada."""
+        for nombre_proceso in self.nombres_procesos:
+            if nombre_proceso in self.process_data:
+                process_info = self.process_data[nombre_proceso]
+                
+                # Limpiar tiempo de llegada
+                process_info["arrival_entry"].delete(0, "end")
+                
+                # Limpiar ráfagas
+                for burst_info in process_info["burst_entries"][:]:
+                    self._remove_burst(nombre_proceso, burst_info["frame"])
 
 
 ...-------------------...
@@ -2055,6 +2657,317 @@ Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\models\__init__.py
 
 
 ...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\excel_export.py
+
+...-------------------...
+import pandas as pd
+import openpyxl
+from openpyxl import Workbook
+from openpyxl.chart import BarChart, Reference
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.drawing.image import Image
+import os
+import io
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from datetime import datetime
+
+def exportar_a_excel(procesos_data, algoritmo, gantt_data, metricas, trm, tem, quantum=None):
+    """
+    Exporta los resultados a un archivo Excel con gráfico de Gantt PNG.
+    
+    Args:
+        procesos_data: Lista de procesos originales
+        algoritmo: Nombre del algoritmo usado
+        gantt_data: Datos del gráfico de Gantt
+        metricas: Lista de métricas calculadas
+        trm: Tiempo de respuesta medio
+        tem: Tiempo de espera medio
+        quantum: Quantum usado (opcional)
+    """
+    
+    # Crear workbook
+    wb = Workbook()
+    
+    # Eliminar hoja por defecto
+    wb.remove(wb.active)
+    
+    # Crear hojas
+    ws_metricas = wb.create_sheet("Métricas")
+    ws_gantt = wb.create_sheet("Gráfico Gantt")
+    ws_datos = wb.create_sheet("Datos Originales")
+    
+    # === HOJA DE MÉTRICAS ===
+    _crear_hoja_metricas(ws_metricas, metricas, trm, tem, algoritmo, quantum)
+    
+    # === HOJA DE GRÁFICO GANTT ===
+    _crear_hoja_gantt_con_imagen(ws_gantt, gantt_data, algoritmo)
+    
+    # === HOJA DE DATOS ORIGINALES ===
+    _crear_hoja_datos_originales(ws_datos, procesos_data)
+    
+    # Generar nombre de archivo
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"resultados_{algoritmo}_{timestamp}.xlsx"
+    
+    # Guardar archivo
+    filepath = os.path.join(os.path.dirname(__file__), filename)
+    wb.save(filepath)
+    
+    return filepath
+
+def _crear_hoja_metricas(ws, metricas, trm, tem, algoritmo, quantum):
+    """Crea la hoja de métricas."""
+    ws.title = "Métricas"
+    
+    # Título
+    ws['A1'] = f"Resultados - Algoritmo {algoritmo}"
+    ws['A1'].font = Font(size=16, bold=True)
+    
+    if quantum:
+        ws['A2'] = f"Quantum: {quantum}"
+        ws['A2'].font = Font(size=12, italic=True)
+    
+    # Métricas generales
+    ws['A4'] = "MÉTRICAS GENERALES"
+    ws['A4'].font = Font(size=14, bold=True)
+    ws['A4'].fill = PatternFill(start_color="E6E6FA", end_color="E6E6FA", fill_type="solid")
+    
+    ws['A5'] = "TRM (Tiempo de Respuesta Medio):"
+    ws['B5'] = trm
+    ws['A6'] = "TEM (Tiempo de Espera Medio):"
+    ws['B6'] = tem
+    
+    # Tabla de métricas por proceso
+    ws['A8'] = "MÉTRICAS POR PROCESO"
+    ws['A8'].font = Font(size=14, bold=True)
+    ws['A8'].fill = PatternFill(start_color="E6E6FA", end_color="E6E6FA", fill_type="solid")
+    
+    # Encabezados
+    headers = ["PID", "Tiempo de Llegada", "Tiempo de CPU", "Tiempo de Respuesta", "Tiempo de Espera"]
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=9, column=col, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Datos
+    for row, metrica in enumerate(metricas, 10):
+        ws.cell(row=row, column=1, value=metrica["PID"])
+        ws.cell(row=row, column=2, value=metrica["Llegada"])
+        ws.cell(row=row, column=3, value=metrica["CPU"])
+        ws.cell(row=row, column=4, value=metrica["TR"])
+        ws.cell(row=row, column=5, value=metrica["TE"])
+        
+        # Formatear números
+        for col in [2, 3, 4, 5]:
+            ws.cell(row=row, column=col).number_format = "0.00"
+    
+    # Ajustar ancho de columnas
+    for col in ['A', 'B', 'C', 'D', 'E']:
+        ws.column_dimensions[col].width = 15
+
+def _crear_hoja_gantt_con_imagen(ws, gantt_data, algoritmo):
+    """Crea la hoja con gráfico de Gantt como imagen PNG."""
+    ws.title = "Gráfico Gantt"
+    
+    # Procesar datos de Gantt
+    procesos_unicos = []
+    gantt_procesado = []
+    
+    for segmento in gantt_data:
+        if len(segmento) == 3:
+            pid, start, end = segmento
+            tipo = "CPU" if pid != "IDLE" else "IDLE"
+        elif len(segmento) == 4:
+            pid, start, end, tipo = segmento
+        else:
+            continue
+            
+        if pid != "IDLE" and pid not in procesos_unicos:
+            procesos_unicos.append(pid)
+            
+        gantt_procesado.append({
+            "PID": pid,
+            "Inicio": start,
+            "Fin": end,
+            "Duración": end - start,
+            "Tipo": tipo
+        })
+    
+    # Crear DataFrame
+    df_gantt = pd.DataFrame(gantt_procesado)
+    
+    # Escribir datos
+    for r in dataframe_to_rows(df_gantt, index=False, header=True):
+        ws.append(r)
+    
+    # Formatear encabezados
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Generar gráfico de Gantt como imagen
+    _generar_gantt_png(ws, gantt_procesado, algoritmo)
+
+def _generar_gantt_png(ws, gantt_procesado, algoritmo):
+    """Genera un gráfico de Gantt como imagen PNG replicando exactamente la lógica del programa original."""
+    if not gantt_procesado:
+        return
+    
+    # Normalizar datos igual que en el programa original
+    norm = []
+    for segmento in gantt_procesado:
+        pid = segmento['PID']
+        start = segmento['Inicio']
+        end = segmento['Fin']
+        tipo = segmento['Tipo']
+        
+        # Convertir tipo a formato del programa original
+        if tipo == "Bloqueo":
+            tipo = "BLOCK"
+        elif tipo == "CPU":
+            tipo = "CPU"
+        elif pid == "IDLE":
+            tipo = "IDLE"
+            
+        norm.append((pid, start, end, tipo))
+    
+    # Obtener procesos únicos (excluir IDLE) - igual que el programa original
+    procesos_unicos = [pid for pid, _, _, tipo in norm if pid != "IDLE"]
+    procesos_unicos = list(dict.fromkeys(procesos_unicos))  # Mantener orden
+    
+    if not procesos_unicos:
+        return
+    
+    # Calcular dimensiones adaptativas - igual que el programa original
+    num_procesos = len(procesos_unicos)
+    max_time = max(end for _, _, end, _ in norm) if norm else 1
+    
+    fig_width = max(15, max_time * 0.25)  # Ancho basado en duración total
+    fig_height = max(4, num_procesos * 0.8)  # Altura basada en número de procesos
+    
+    # Crear figura con las mismas dimensiones
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+    
+    # Posiciones Y para cada proceso - igual que el programa original
+    y_positions = {pid: i for i, pid in enumerate(procesos_unicos)}
+    
+    # Colores - usar la misma paleta que el programa original
+    colors = {}
+    color_palette = plt.cm.get_cmap("tab20", len(procesos_unicos) + 1)
+    
+    # Dibujar barras - replicar exactamente la lógica del programa original
+    for pid, start, end, tipo in norm:
+        if tipo == "IDLE":
+            color = "lightgray"
+            hatch = None
+            y = -1
+            alpha = 0.7
+        elif tipo == "BLOCK":
+            color = "darkred"
+            hatch = "///"
+            y = y_positions.get(pid, 0)
+            alpha = 0.8
+        else:  # CPU
+            if pid not in colors:
+                colors[pid] = color_palette(len(colors))
+            color = colors[pid]
+            hatch = None
+            y = y_positions.get(pid, 0)
+            alpha = 1.0
+        
+        # Dibujar barra horizontal - mismo estilo que el programa original
+        ax.barh(y, end - start, left=start, height=0.6, color=color, 
+               edgecolor='black', hatch=hatch, alpha=alpha)
+        
+        if tipo != "IDLE":
+            # Mostrar el PID y el tipo de ráfaga - mismo formato que el programa original
+            text = f"{pid}\n({tipo})" if tipo == "BLOCK" else str(pid)
+            ax.text((start + end) / 2, y, text, ha='center', va='center',
+                    fontsize=7, color="white" if tipo == "BLOCK" else "black",
+                    weight="bold" if tipo == "BLOCK" else "normal")
+    
+    # Configurar ejes - igual que el programa original
+    if procesos_unicos:
+        ax.set_yticks(list(y_positions.values()))
+        ax.set_yticklabels(list(y_positions.keys()))
+    else:
+        ax.set_yticks([])
+    
+    if norm:
+        max_time = max(end for _, _, end, _ in norm)
+        # Mostrar TODOS los ticks del 0 al tiempo máximo - igual que el programa original
+        ax.set_xticks(range(0, max_time + 1))
+        ax.set_xlim(0, max_time)
+    
+    ax.set_xlabel("Tiempo")
+    ax.set_ylabel("Procesos")
+    ax.set_title(f"Diagrama de Gantt - {algoritmo}")
+    ax.grid(True, axis='x', linestyle='--', alpha=0.6)
+    
+    # Leyenda explicativa - igual que el programa original
+    legend_elements = [
+        plt.Rectangle((0,0),1,1, facecolor='lightblue', edgecolor='black', label='CPU'),
+        plt.Rectangle((0,0),1,1, facecolor='darkred', edgecolor='black', hatch='///', label='Bloqueo (E/S)'),
+        plt.Rectangle((0,0),1,1, facecolor='lightgray', edgecolor='black', alpha=0.7, label='IDLE')
+    ]
+    ax.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1))
+    
+    # Ajustar layout
+    plt.tight_layout()
+    
+    # Guardar imagen en memoria
+    img_buffer = io.BytesIO()
+    plt.savefig(img_buffer, format='png', dpi=300, bbox_inches='tight')
+    img_buffer.seek(0)
+    
+    # Insertar imagen en Excel
+    img = Image(img_buffer)
+    img.width = 800  # Ancho más grande para mejor visualización
+    img.height = 400  # Alto más grande
+    
+    # Posicionar imagen debajo de los datos
+    ws.add_image(img, 'A8')
+    
+    # Cerrar figura para liberar memoria
+    plt.close(fig)
+
+def _crear_hoja_datos_originales(ws, procesos_data):
+    """Crea la hoja con los datos originales de entrada."""
+    ws.title = "Datos Originales"
+    
+    # Título
+    ws['A1'] = "Datos Originales de los Procesos"
+    ws['A1'].font = Font(size=16, bold=True)
+    
+    # Encabezados
+    headers = ["PID", "Tiempo de Llegada", "Secuencia de Ráfagas"]
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=3, column=col, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Datos
+    for row, proceso in enumerate(procesos_data, 4):
+        ws.cell(row=row, column=1, value=proceso["pid"])
+        ws.cell(row=row, column=2, value=proceso["arrival_time"])
+        
+        # Formatear ráfagas como texto
+        bursts_text = " -> ".join([f"{'CPU' if i%2==0 else 'E/S'}: {burst}" 
+                                  for i, burst in enumerate(proceso["bursts"])])
+        ws.cell(row=row, column=3, value=bursts_text)
+    
+    # Ajustar ancho de columnas
+    ws.column_dimensions['A'].width = 10
+    ws.column_dimensions['B'].width = 15
+    ws.column_dimensions['C'].width = 50
+
+
+...-------------------...
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\gantt.py
 
 ...-------------------...
@@ -2127,10 +3040,269 @@ def plot_gantt(gantt_chart, title="Diagrama de Gantt"):
 
 
 ...-------------------...
-Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\input_handler.py
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\historial.py
 
 ...-------------------...
+import json
+import os
+from datetime import datetime
 
+HISTORIAL_FILE = os.path.join(os.path.dirname(__file__), "historial.json")
+
+def _leer_historial():
+    if os.path.exists(HISTORIAL_FILE):
+        with open(HISTORIAL_FILE, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
+    return []
+
+def _guardar_historial(data):
+    with open(HISTORIAL_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+def guardar_ejercicio(nombre, procesos, algoritmo, quantum=None):
+    """
+    Guarda un ejercicio en el historial.
+    procesos: lista de dicts con {"pid":..., "arrival_time":..., "bursts": [...]}
+    """
+    historial = _leer_historial()
+    entrada = {
+        "nombre": nombre,
+        "fecha": datetime.now().isoformat(timespec="seconds"),
+        "algoritmo": algoritmo,
+        "quantum": quantum,
+        "procesos": procesos
+    }
+    historial.append(entrada)
+    _guardar_historial(historial)
+
+def listar_historial():
+    """Devuelve una lista de (indice, nombre, fecha, algoritmo) para mostrar en la GUI."""
+    historial = _leer_historial()
+    return [(i, h["nombre"], h["fecha"], h["algoritmo"]) for i, h in enumerate(historial)]
+
+def cargar_ejercicio(indice):
+    """Devuelve el ejercicio guardado en la posición 'indice'."""
+    historial = _leer_historial()
+    if 0 <= indice < len(historial):
+        return historial[indice]
+    return None
+
+# ===== FUNCIONES PARA INPUTS DE DATOS =====
+
+INPUT_HISTORIAL_FILE = os.path.join(os.path.dirname(__file__), "input_historial.json")
+
+def _leer_input_historial():
+    """Lee el historial de inputs desde el archivo JSON."""
+    if os.path.exists(INPUT_HISTORIAL_FILE):
+        with open(INPUT_HISTORIAL_FILE, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return []
+    return []
+
+def _guardar_input_historial(data):
+    """Guarda el historial de inputs en el archivo JSON.""" #a partir de esto se puede cargar luego.
+    with open(INPUT_HISTORIAL_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+def guardar_input_config(nombre, procesos_config):
+    """
+    Guarda una configuración de inputs en el historial.
+    procesos_config: lista de dicts con {"nombre": str, "arrival": int, "bursts": [int, ...]}
+    """
+    historial = _leer_input_historial()
+    entrada = {
+        "nombre": nombre,
+        "fecha": datetime.now().isoformat(timespec="seconds"),
+        "procesos": procesos_config
+    }
+    historial.append(entrada)
+    _guardar_input_historial(historial)
+
+def listar_input_configs():
+    """Devuelve una lista de (indice, nombre, fecha, num_procesos) para mostrar en la GUI."""
+    historial = _leer_input_historial()
+    return [(i, h["nombre"], h["fecha"], len(h["procesos"])) for i, h in enumerate(historial)]
+
+def cargar_input_config(indice):
+    """Devuelve la configuración de inputs guardada en la posición 'indice'."""
+    historial = _leer_input_historial()
+    if 0 <= indice < len(historial):
+        return historial[indice]
+    return None
+
+def eliminar_input_config(indice):
+    """Elimina una configuración de inputs del historial."""
+    historial = _leer_input_historial()
+    if 0 <= indice < len(historial):
+        nombre_eliminado = historial[indice]["nombre"]
+        del historial[indice]
+        _guardar_input_historial(historial)
+        return nombre_eliminado
+    return None
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\input_historial.json
+
+...-------------------...
+[
+    {
+        "nombre": "Punto 1 GUIA 2 JAVI",
+        "fecha": "2025-09-13T16:54:00",
+        "procesos": [
+            {
+                "nombre": "P1",
+                "arrival": 0,
+                "bursts": [
+                    2,
+                    5,
+                    13
+                ]
+            },
+            {
+                "nombre": "P2",
+                "arrival": 0,
+                "bursts": [
+                    9,
+                    3,
+                    5,
+                    5,
+                    4
+                ]
+            },
+            {
+                "nombre": "P3",
+                "arrival": 1,
+                "bursts": [
+                    5
+                ]
+            },
+            {
+                "nombre": "P4",
+                "arrival": 1,
+                "bursts": [
+                    4,
+                    6,
+                    5
+                ]
+            },
+            {
+                "nombre": "P5",
+                "arrival": 2,
+                "bursts": [
+                    5,
+                    5,
+                    5,
+                    5,
+                    5
+                ]
+            },
+            {
+                "nombre": "P6",
+                "arrival": 2,
+                "bursts": [
+                    3
+                ]
+            },
+            {
+                "nombre": "P7",
+                "arrival": 4,
+                "bursts": [
+                    5
+                ]
+            },
+            {
+                "nombre": "P8",
+                "arrival": 6,
+                "bursts": [
+                    5,
+                    2,
+                    5
+                ]
+            },
+            {
+                "nombre": "P9",
+                "arrival": 8,
+                "bursts": [
+                    5
+                ]
+            },
+            {
+                "nombre": "P10",
+                "arrival": 8,
+                "bursts": [
+                    5,
+                    4,
+                    5
+                ]
+            }
+        ]
+    },
+    {
+        "nombre": "Punto 3 GUIA 2",
+        "fecha": "2025-09-15T03:07:25",
+        "procesos": [
+            {
+                "nombre": "P1",
+                "arrival": 0,
+                "bursts": [
+                    5,
+                    22,
+                    5
+                ]
+            },
+            {
+                "nombre": "P2",
+                "arrival": 0,
+                "bursts": [
+                    2,
+                    10,
+                    9
+                ]
+            },
+            {
+                "nombre": "P3",
+                "arrival": 0,
+                "bursts": [
+                    6,
+                    101,
+                    5,
+                    10,
+                    1
+                ]
+            },
+            {
+                "nombre": "P4",
+                "arrival": 0,
+                "bursts": [
+                    7,
+                    61,
+                    8
+                ]
+            },
+            {
+                "nombre": "P5",
+                "arrival": 1,
+                "bursts": [
+                    13
+                ]
+            },
+            {
+                "nombre": "P6",
+                "arrival": 2,
+                "bursts": [
+                    9,
+                    252,
+                    8
+                ]
+            }
+        ]
+    }
+]
 
 ...-------------------...
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\metricas.py
