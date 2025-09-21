@@ -8,17 +8,15 @@ class DataInputScreen(ctk.CTkFrame):
         self.nombres_procesos = nombres_procesos
         self.on_continue = on_continue
 
-        self.entries_ta = []
-        self.entries_cpu1 = []
-        self.entries_bloq = []
-        self.entries_cpu2 = []
-        self.check_vars = []  # Estado de cada checkbox
-
+        # Estructura de datos para múltiples ráfagas
+        self.process_data = {}  # {nombre: {"arrival": int, "bursts": [int, int, ...]}}
+        
         self.label_title = ctk.CTkLabel(self, text="Ingresar datos de procesos", font=("Arial", 18, "bold"))
         self.label_title.pack(pady=20)
 
-        self.form_frame = ctk.CTkFrame(self)
-        self.form_frame.pack(padx=10, pady=10, fill="both", expand=True)
+        # Frame con scroll para muchos procesos
+        self.scroll_frame = ctk.CTkScrollableFrame(self, height=400)
+        self.scroll_frame.pack(padx=10, pady=10, fill="both", expand=True)
 
         self._build_rows()
 
@@ -39,98 +37,211 @@ class DataInputScreen(ctk.CTkFrame):
 
     def _build_rows(self):
         for nombre in self.nombres_procesos:
-            row = ctk.CTkFrame(self.form_frame)
-            row.pack(pady=5, fill="x")
+            # Inicializar datos del proceso
+            self.process_data[nombre] = {
+                "arrival": None,
+                "bursts": []
+            }
+            
+            # Frame principal del proceso
+            process_frame = ctk.CTkFrame(self.scroll_frame)
+            process_frame.pack(pady=10, fill="x", padx=5)
+            
+            # Título del proceso
+            title_frame = ctk.CTkFrame(process_frame)
+            title_frame.pack(fill="x", padx=5, pady=5)
+            
+            ctk.CTkLabel(title_frame, text=f"Proceso: {nombre}", font=("Arial", 14, "bold")).pack(side="left")
+            
+            # Tiempo de llegada
+            arrival_frame = ctk.CTkFrame(process_frame)
+            arrival_frame.pack(fill="x", padx=5, pady=2)
+            
+            ctk.CTkLabel(arrival_frame, text="Tiempo de llegada:", width=120).pack(side="left", padx=5)
+            arrival_entry = ctk.CTkEntry(arrival_frame, placeholder_text="Ej: 0", width=80)
+            arrival_entry.pack(side="left", padx=5)
+            
+            # Frame para las ráfagas
+            bursts_frame = ctk.CTkFrame(process_frame)
+            bursts_frame.pack(fill="x", padx=5, pady=5)
+            
+            ctk.CTkLabel(bursts_frame, text="Secuencia de ráfagas:", font=("Arial", 12, "bold")).pack(anchor="w", padx=5, pady=2)
+            
+            # Frame para los controles de ráfagas
+            controls_frame = ctk.CTkFrame(bursts_frame)
+            controls_frame.pack(fill="x", padx=5, pady=2)
+            
+            # Botón para agregar ráfaga
+            add_btn = ctk.CTkButton(controls_frame, text="+ Agregar ráfaga", width=120, 
+                                   command=lambda n=nombre: self._add_burst(n))
+            add_btn.pack(side="left", padx=5)
+            
+            # Frame para mostrar las ráfagas
+            bursts_display_frame = ctk.CTkFrame(bursts_frame)
+            bursts_display_frame.pack(fill="x", padx=5, pady=5)
+            
+            # Almacenar referencias para este proceso
+            self.process_data[nombre]["arrival_entry"] = arrival_entry
+            self.process_data[nombre]["bursts_display_frame"] = bursts_display_frame
+            self.process_data[nombre]["burst_entries"] = []
+            
+            # Agregar primera ráfaga de CPU por defecto
+            self._add_burst(nombre, burst_type="CPU")
 
-            ctk.CTkLabel(row, text=nombre, width=80).pack(side="left", padx=5)
-
-            ta = ctk.CTkEntry(row, placeholder_text="Llegada", width=60)
-            ta.pack(side="left", padx=5)
-            self.entries_ta.append(ta)
-
-            cpu1 = ctk.CTkEntry(row, placeholder_text="CPU1", width=60)
-            cpu1.pack(side="left", padx=5)
-            self.entries_cpu1.append(cpu1)
-
-            var = ctk.BooleanVar(value=False)
-            chk = ctk.CTkCheckBox(row, text="Tiene bloqueo", variable=var,
-                                  command=lambda v=var, r=row: self._toggle_block_fields(v, r))
-            chk.pack(side="left", padx=5)
-            self.check_vars.append(var)
-
-            # Campos de bloqueo ocultos por defecto
-            bloq = ctk.CTkEntry(row, placeholder_text="Bloqueo (E/S)", width=80)
-            cpu2 = ctk.CTkEntry(row, placeholder_text="CPU2", width=60)
-            self.entries_bloq.append(bloq)
-            self.entries_cpu2.append(cpu2)
-
-    def _toggle_block_fields(self, var, row):
-        idx = self.check_vars.index(var)
-        bloq = self.entries_bloq[idx]
-        cpu2 = self.entries_cpu2[idx]
-        if var.get():
-            bloq.pack(side="left", padx=5)
-            cpu2.pack(side="left", padx=5)
+    def _add_burst(self, process_name, burst_type=None):
+        """Agrega una nueva ráfaga al proceso especificado."""
+        process_info = self.process_data[process_name]
+        burst_entries = process_info["burst_entries"]
+        display_frame = process_info["bursts_display_frame"]
+        
+        # Determinar el tipo de ráfaga si no se especifica
+        if burst_type is None:
+            # Si no hay ráfagas, empezar con CPU
+            if not burst_entries:
+                burst_type = "CPU"
+            else:
+                # Alternar entre CPU y Bloqueo
+                last_type = burst_entries[-1]["type"]
+                burst_type = "Bloqueo" if last_type == "CPU" else "CPU"
+        
+        # Frame para esta ráfaga
+        burst_frame = ctk.CTkFrame(display_frame)
+        burst_frame.pack(fill="x", padx=2, pady=2)
+        
+        # Tipo de ráfaga
+        type_label = ctk.CTkLabel(burst_frame, text=f"{burst_type}:", width=80)
+        type_label.pack(side="left", padx=5)
+        
+        # Campo de entrada
+        burst_entry = ctk.CTkEntry(burst_frame, placeholder_text=f"Duración {burst_type}", width=100)
+        burst_entry.pack(side="left", padx=5)
+        
+        # Botón para eliminar
+        remove_btn = ctk.CTkButton(burst_frame, text="✕", width=30, height=25,
+                                  command=lambda: self._remove_burst(process_name, burst_frame))
+        remove_btn.pack(side="left", padx=5)
+        
+        # Almacenar información de la ráfaga
+        burst_info = {
+            "frame": burst_frame,
+            "entry": burst_entry,
+            "type": burst_type
+        }
+        burst_entries.append(burst_info)
+        
+        # Actualizar la secuencia visual
+        self._update_sequence_display(process_name)
+    
+    def _remove_burst(self, process_name, burst_frame):
+        """Elimina una ráfaga del proceso especificado."""
+        process_info = self.process_data[process_name]
+        burst_entries = process_info["burst_entries"]
+        
+        # Encontrar y eliminar la ráfaga
+        for i, burst_info in enumerate(burst_entries):
+            if burst_info["frame"] == burst_frame:
+                burst_entries.pop(i)
+                burst_frame.destroy()
+                break
+        
+        # Actualizar la secuencia visual
+        self._update_sequence_display(process_name)
+    
+    def _update_sequence_display(self, process_name):
+        """Actualiza la visualización de la secuencia de ráfagas."""
+        process_info = self.process_data[process_name]
+        burst_entries = process_info["burst_entries"]
+        
+        # Crear texto descriptivo de la secuencia
+        if burst_entries:
+            sequence_parts = []
+            for i, burst_info in enumerate(burst_entries):
+                sequence_parts.append(f"{burst_info['type']}{i+1}")
+            sequence_text = " → ".join(sequence_parts)
         else:
-            bloq.pack_forget()
-            cpu2.pack_forget()
-            bloq.delete(0, "end")
-            cpu2.delete(0, "end")
+            sequence_text = "Sin ráfagas"
+        
+        # Actualizar o crear label de secuencia
+        if "sequence_label" not in process_info:
+            sequence_label = ctk.CTkLabel(process_info["bursts_display_frame"], 
+                                        text=f"Secuencia: {sequence_text}", 
+                                        font=("Arial", 10, "italic"))
+            sequence_label.pack(anchor="w", padx=5, pady=2)
+            process_info["sequence_label"] = sequence_label
+        else:
+            process_info["sequence_label"].configure(text=f"Secuencia: {sequence_text}")
 
     def _continue_clicked(self):
         procesos_data = []
         try:
-            for i, nombre in enumerate(self.nombres_procesos):
-                ta_str = self.entries_ta[i].get().strip()
-                cpu1_str = self.entries_cpu1[i].get().strip()
+            for nombre in self.nombres_procesos:
+                process_info = self.process_data[nombre]
+                
+                # Validar tiempo de llegada
+                arrival_str = process_info["arrival_entry"].get().strip()
+                if not arrival_str:
+                    raise ValueError(f"Proceso {nombre}: Tiempo de llegada requerido")
+                
+                arrival_time = int(arrival_str)
+                if arrival_time < 0:
+                    raise ValueError(f"Proceso {nombre}: Tiempo de llegada debe ser ≥ 0")
+                
+                # Validar ráfagas
+                burst_entries = process_info["burst_entries"]
+                if not burst_entries:
+                    raise ValueError(f"Proceso {nombre}: Debe tener al menos una ráfaga")
+                
+                bursts = []
+                for burst_info in burst_entries:
+                    duration_str = burst_info["entry"].get().strip()
+                    if not duration_str:
+                        raise ValueError(f"Proceso {nombre}: Todas las duraciones son requeridas")
+                    
+                    duration = int(duration_str)
+                    if duration < 0:
+                        raise ValueError(f"Proceso {nombre}: Las duraciones deben ser ≥ 0")
+                    
+                    bursts.append(duration)
+                
+                # Validar que termine con CPU (índice par)
+                if len(bursts) % 2 == 0:
+                    # Termina con CPU, está bien
+                    pass
+                else:
+                    # Termina con bloqueo, agregar CPU de 0
+                    bursts.append(0)
+                
+                # Validar que tenga al menos una ráfaga de CPU
+                cpu_bursts = [bursts[i] for i in range(0, len(bursts), 2)]
+                if not any(cpu > 0 for cpu in cpu_bursts):
+                    raise ValueError(f"Proceso {nombre}: Debe tener al menos una ráfaga de CPU > 0")
+                
+                procesos_data.append({
+                    "pid": nombre, 
+                    "arrival_time": arrival_time, 
+                    "bursts": bursts
+                })
 
-                if not ta_str or not cpu1_str:
-                    raise ValueError
-
-                ta = int(ta_str)
-                cpu1 = int(cpu1_str)
-                if ta < 0 or cpu1 <= 0:
-                    raise ValueError
-
-                bursts = [cpu1]
-
-                if self.check_vars[i].get():
-                    bloq_str = self.entries_bloq[i].get().strip()
-                    cpu2_str = self.entries_cpu2[i].get().strip()
-                    if not bloq_str or not cpu2_str:
-                        raise ValueError
-                    bloq = int(bloq_str)
-                    cpu2 = int(cpu2_str)
-                    if bloq < 0 or cpu2 <= 0:
-                        raise ValueError
-                    bursts.extend([bloq, cpu2])
-
-                procesos_data.append({"pid": nombre, "arrival_time": ta, "bursts": bursts})
-
-        except ValueError:
-            messagebox.showerror(
-                "Error",
-                "Verifique que:\n- Llegada ≥ 0\n- CPU1 > 0\n- Si marca bloqueo, complete Bloqueo y CPU2\n- Todos los valores sean enteros."
-            )
+        except ValueError as e:
+            messagebox.showerror("Error de validación", str(e))
+            return
+        except Exception as e:
+            messagebox.showerror("Error", f"Error inesperado: {e}")
             return
 
         self.on_continue(procesos_data)
 
     def _guardar_configuracion(self):
         """Guarda la configuración actual de inputs."""
-        # Crear ventana de diálogo para ingresar nombre
+        # Crear ventana de diálogo para ingresar nombre de
         dialog = ctk.CTkToplevel(self)
         dialog.title("Guardar configuración")
         dialog.geometry("400x150")
         dialog.transient(self)
+        dialog.grab_set()
         
         # Centrar la ventana
         dialog.geometry("+%d+%d" % (self.winfo_rootx() + 50, self.winfo_rooty() + 50))
-        
-        # Configuraciones específicas para ZorinOS/Linux
-        dialog.configure(fg_color=("gray95", "gray10"))
-        dialog.lift()
-        dialog.focus_force()
         
         # Frame principal
         main_frame = ctk.CTkFrame(dialog)
@@ -157,23 +268,19 @@ class DataInputScreen(ctk.CTkFrame):
             try:
                 # Recopilar datos actuales
                 config_procesos = []
-                for i, nombre_proceso in enumerate(self.nombres_procesos):
+                for nombre_proceso in self.nombres_procesos:
+                    process_info = self.process_data[nombre_proceso]
+                    
                     # Obtener tiempo de llegada
-                    ta_str = self.entries_ta[i].get().strip()
-                    arrival = int(ta_str) if ta_str else 0
+                    arrival_str = process_info["arrival_entry"].get().strip()
+                    arrival = int(arrival_str) if arrival_str else 0
                     
                     # Obtener ráfagas
-                    cpu1_str = self.entries_cpu1[i].get().strip()
-                    cpu1 = int(cpu1_str) if cpu1_str else 0
-                    
-                    bursts = [cpu1]
-                    
-                    if self.check_vars[i].get():
-                        bloq_str = self.entries_bloq[i].get().strip()
-                        cpu2_str = self.entries_cpu2[i].get().strip()
-                        bloq = int(bloq_str) if bloq_str else 0
-                        cpu2 = int(cpu2_str) if cpu2_str else 0
-                        bursts.extend([bloq, cpu2])
+                    bursts = []
+                    for burst_info in process_info["burst_entries"]:
+                        duration_str = burst_info["entry"].get().strip()
+                        duration = int(duration_str) if duration_str else 0
+                        bursts.append(duration)
                     
                     config_procesos.append({
                         "nombre": nombre_proceso,
@@ -200,31 +307,9 @@ class DataInputScreen(ctk.CTkFrame):
         
         # Permitir guardar con Enter
         entry_nombre.bind("<Return>", lambda e: guardar())
-        
-        # Forzar actualización para ZorinOS
-        dialog.update_idletasks()
-        dialog.update()
-        dialog.lift()
-        dialog.focus_force()
-        
-        # Hacer grab_set después de que la ventana sea visible (solo en Linux)
-        try:
-            dialog.grab_set()
-        except:
-            pass  # Si falla, no es crítico
 
     def _cargar_configuracion(self):
-        """Carga una configuración guardada con mejoras para ZorinOS."""
-        try:
-            # Intentar con CustomTkinter primero
-            self._cargar_configuracion_ctk()
-        except Exception as e:
-            print(f"Error con CustomTkinter: {e}")
-            # Si falla, usar tkinter nativo
-            self._cargar_configuracion_fallback()
-
-    def _cargar_configuracion_ctk(self):
-        """Versión con CustomTkinter optimizada para ZorinOS."""
+        """Carga una configuración guardada."""
         # Obtener lista de configuraciones guardadas
         configs = historial.listar_input_configs()
         
@@ -237,14 +322,10 @@ class DataInputScreen(ctk.CTkFrame):
         dialog.title("Cargar configuración")
         dialog.geometry("600x400")
         dialog.transient(self)
+        dialog.grab_set()
         
         # Centrar la ventana
         dialog.geometry("+%d+%d" % (self.winfo_rootx() + 50, self.winfo_rooty() + 50))
-        
-        # Configuraciones específicas para ZorinOS/Linux
-        dialog.configure(fg_color=("gray95", "gray10"))
-        dialog.lift()
-        dialog.focus_force()
         
         # Frame principal
         main_frame = ctk.CTkFrame(dialog)
@@ -354,150 +435,6 @@ class DataInputScreen(ctk.CTkFrame):
         
         btn_cancelar = ctk.CTkButton(btn_frame, text="Cancelar", command=dialog.destroy)
         btn_cancelar.pack(side="left", padx=5)
-        
-        # Forzar actualización y renderizado en ZorinOS
-        dialog.update_idletasks()
-        dialog.update()
-        dialog.lift()
-        dialog.focus_force()
-        
-        # Hacer grab_set después de que la ventana sea visible (solo en Linux)
-        try:
-            dialog.grab_set()
-        except:
-            pass  # Si falla, no es crítico
-        
-        # Configurar evento de cierre
-        def on_closing():
-            try:
-                dialog.grab_release()
-            except:
-                pass
-            dialog.destroy()
-        
-        dialog.protocol("WM_DELETE_WINDOW", on_closing)
-
-    def _cargar_configuracion_fallback(self):
-        """Versión alternativa usando tkinter nativo para ZorinOS."""
-        from tkinter import Toplevel, Label, Button, Listbox, Scrollbar, Frame
-        from tkinter import messagebox as tk_messagebox
-        
-        # Obtener lista de configuraciones guardadas
-        configs = historial.listar_input_configs()
-        
-        if not configs:
-            tk_messagebox.showinfo("Información", "No hay configuraciones guardadas")
-            return
-        
-        # Crear ventana de diálogo
-        dialog = Toplevel(self)
-        dialog.title("Cargar configuración")
-        dialog.geometry("600x400")
-        dialog.transient(self)
-        
-        # Centrar la ventana
-        dialog.geometry("+%d+%d" % (self.winfo_rootx() + 50, self.winfo_rooty() + 50))
-        
-        # Frame principal
-        main_frame = Frame(dialog)
-        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Título
-        label_titulo = Label(main_frame, text="Seleccionar configuración a cargar:", font=("Arial", 14, "bold"))
-        label_titulo.pack(pady=(0, 10))
-        
-        # Frame para la lista
-        list_frame = Frame(main_frame)
-        list_frame.pack(fill="both", expand=True, pady=(0, 10))
-        
-        # Listbox con scrollbar
-        listbox = Listbox(list_frame, height=10)
-        scrollbar = Scrollbar(list_frame, orient="vertical", command=listbox.yview)
-        listbox.configure(yscrollcommand=scrollbar.set)
-        
-        # Empaquetar
-        listbox.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Llenar la lista
-        for indice, nombre, fecha, num_procesos in configs:
-            try:
-                from datetime import datetime
-                dt = datetime.fromisoformat(fecha)
-                fecha_formateada = dt.strftime("%d/%m/%Y %H:%M")
-            except:
-                fecha_formateada = fecha
-            
-            listbox.insert("end", f"{nombre} - {fecha_formateada} - {num_procesos} procesos")
-        
-        # Botones
-        btn_frame = Frame(main_frame)
-        btn_frame.pack()
-        
-        def cargar():
-            seleccion = listbox.curselection()
-            if not seleccion:
-                tk_messagebox.showwarning("Advertencia", "Seleccione una configuración para cargar")
-                return
-            
-            indice = seleccion[0]
-            
-            try:
-                # Cargar la configuración
-                config = historial.cargar_input_config(indice)
-                if config is None:
-                    tk_messagebox.showerror("Error", "No se pudo cargar la configuración seleccionada")
-                    return
-                
-                # Aplicar la configuración
-                self._aplicar_configuracion(config)
-                
-                tk_messagebox.showinfo("Éxito", f"Configuración '{config['nombre']}' cargada exitosamente")
-                dialog.destroy()
-                
-            except Exception as e:
-                tk_messagebox.showerror("Error", f"Error al cargar la configuración: {e}")
-        
-        def eliminar():
-            seleccion = listbox.curselection()
-            if not seleccion:
-                tk_messagebox.showwarning("Advertencia", "Seleccione una configuración para eliminar")
-                return
-            
-            if not tk_messagebox.askyesno("Confirmar", "¿Está seguro de que desea eliminar esta configuración?"):
-                return
-            
-            indice = seleccion[0]
-            
-            try:
-                nombre_eliminado = historial.eliminar_input_config(indice)
-                if nombre_eliminado:
-                    listbox.delete(seleccion[0])
-                    tk_messagebox.showinfo("Éxito", f"Configuración '{nombre_eliminado}' eliminada exitosamente")
-                
-            except Exception as e:
-                tk_messagebox.showerror("Error", f"Error al eliminar la configuración: {e}")
-        
-        btn_cargar = Button(btn_frame, text="Cargar", command=cargar, bg="green", fg="white")
-        btn_cargar.pack(side="left", padx=5)
-        
-        btn_eliminar = Button(btn_frame, text="Eliminar", command=eliminar, bg="red", fg="white")
-        btn_eliminar.pack(side="left", padx=5)
-        
-        btn_cancelar = Button(btn_frame, text="Cancelar", command=dialog.destroy)
-        btn_cancelar.pack(side="left", padx=5)
-        
-        # Forzar actualización
-        dialog.update_idletasks()
-        dialog.update()
-        dialog.lift()
-        dialog.focus_force()
-        
-        # Hacer grab_set después de que la ventana sea visible
-        try:
-            dialog.grab_set()
-        except:
-            pass  # Si falla, no es crítico
 
     def _aplicar_configuracion(self, config):
         """Aplica una configuración cargada a los campos de entrada."""
@@ -509,52 +446,45 @@ class DataInputScreen(ctk.CTkFrame):
             for proceso_config in config["procesos"]:
                 nombre_proceso = proceso_config["nombre"]
                 
-                # Buscar el índice del proceso
-                try:
-                    idx = self.nombres_procesos.index(nombre_proceso)
-                except ValueError:
-                    continue  # Si no encuentra el proceso, continuar con el siguiente
-                
-                # Aplicar tiempo de llegada
-                if proceso_config["arrival"] is not None:
-                    self.entries_ta[idx].delete(0, "end")
-                    self.entries_ta[idx].insert(0, str(proceso_config["arrival"]))
-                
-                # Aplicar ráfagas
-                bursts = proceso_config["bursts"]
-                if bursts:
-                    # CPU1
-                    if len(bursts) > 0:
-                        self.entries_cpu1[idx].delete(0, "end")
-                        self.entries_cpu1[idx].insert(0, str(bursts[0]))
+                if nombre_proceso in self.process_data:
+                    process_info = self.process_data[nombre_proceso]
                     
-                    # Si hay más ráfagas, activar bloqueo
-                    if len(bursts) > 1:
-                        self.check_vars[idx].set(True)
-                        self._toggle_block_fields(self.check_vars[idx], None)
+                    # Aplicar tiempo de llegada
+                    if proceso_config["arrival"] is not None:
+                        process_info["arrival_entry"].delete(0, "end")
+                        process_info["arrival_entry"].insert(0, str(proceso_config["arrival"]))
+                    
+                    # Aplicar ráfagas
+                    bursts = proceso_config["bursts"]
+                    if bursts:
+                        # Limpiar ráfagas existentes
+                        for burst_info in process_info["burst_entries"][:]:
+                            self._remove_burst(nombre_proceso, burst_info["frame"])
                         
-                        # Bloqueo
-                        if len(bursts) > 1:
-                            self.entries_bloq[idx].delete(0, "end")
-                            self.entries_bloq[idx].insert(0, str(bursts[1]))
-                        
-                        # CPU2
-                        if len(bursts) > 2:
-                            self.entries_cpu2[idx].delete(0, "end")
-                            self.entries_cpu2[idx].insert(0, str(bursts[2]))
+                        # Añadir ráfagas de la configuración
+                        for i, duration in enumerate(bursts):
+                            # Determinar tipo de ráfaga (alternando CPU y Bloqueo)
+                            burst_type = "CPU" if i % 2 == 0 else "Bloqueo"
+                            self._add_burst(nombre_proceso, burst_type)
+                            
+                            # Establecer el valor
+                            if process_info["burst_entries"]:
+                                last_burst = process_info["burst_entries"][-1]
+                                last_burst["entry"].delete(0, "end")
+                                last_burst["entry"].insert(0, str(duration))
                         
         except Exception as e:
             messagebox.showerror("Error", f"Error al aplicar la configuración: {e}")
 
     def _limpiar_campos(self):
         """Limpia todos los campos de entrada."""
-        for i in range(len(self.nombres_procesos)):
-            # Limpiar tiempo de llegada
-            self.entries_ta[i].delete(0, "end")
-            
-            # Limpiar CPU1
-            self.entries_cpu1[i].delete(0, "end")
-            
-            # Desactivar bloqueo y limpiar campos
-            self.check_vars[i].set(False)
-            self._toggle_block_fields(self.check_vars[i], None)
+        for nombre_proceso in self.nombres_procesos:
+            if nombre_proceso in self.process_data:
+                process_info = self.process_data[nombre_proceso]
+                
+                # Limpiar tiempo de llegada
+                process_info["arrival_entry"].delete(0, "end")
+                
+                # Limpiar ráfagas
+                for burst_info in process_info["burst_entries"][:]:
+                    self._remove_burst(nombre_proceso, burst_info["frame"])
