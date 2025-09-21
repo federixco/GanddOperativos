@@ -465,7 +465,12 @@ class AlgorithmScreen(ctk.CTkFrame):
             return
         
         # Determinar si hacer zoom in o out
-        if event.delta > 0:
+        # Manejar diferentes plataformas (Windows usa delta, Linux/Mac usan step)
+        delta = getattr(event, 'delta', None)
+        if delta is None:
+            delta = getattr(event, 'step', 0)
+        
+        if delta > 0:
             self._zoom_in()
         else:
             self._zoom_out()

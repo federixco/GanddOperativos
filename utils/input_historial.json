@@ -150,5 +150,108 @@
                 ]
             }
         ]
+    },
+    {
+        "nombre": "punto1 guianueva",
+        "fecha": "2025-09-21T19:52:30",
+        "procesos": [
+            {
+                "nombre": "A",
+                "arrival": 0,
+                "bursts": [
+                    4,
+                    2,
+                    2,
+                    1,
+                    1
+                ]
+            },
+            {
+                "nombre": "B",
+                "arrival": 0,
+                "bursts": [
+                    2,
+                    3,
+                    4,
+                    2,
+                    2
+                ]
+            },
+            {
+                "nombre": "C",
+                "arrival": 0,
+                "bursts": [
+                    4,
+                    1,
+                    3,
+                    3,
+                    4
+                ]
+            },
+            {
+                "nombre": "D",
+                "arrival": 2,
+                "bursts": [
+                    5,
+                    2,
+                    2,
+                    1,
+                    1
+                ]
+            },
+            {
+                "nombre": "E",
+                "arrival": 3,
+                "bursts": [
+                    4,
+                    3,
+                    6,
+                    2,
+                    2
+                ]
+            },
+            {
+                "nombre": "F",
+                "arrival": 5,
+                "bursts": [
+                    7,
+                    2,
+                    4,
+                    4,
+                    4
+                ]
+            },
+            {
+                "nombre": "G",
+                "arrival": 7,
+                "bursts": [
+                    1,
+                    2,
+                    3,
+                    1,
+                    2
+                ]
+            },
+            {
+                "nombre": "H",
+                "arrival": 7,
+                "bursts": [
+                    3,
+                    4,
+                    3,
+                    4,
+                    3
+                ]
+            },
+            {
+                "nombre": "I",
+                "arrival": 8,
+                "bursts": [
+                    8,
+                    4,
+                    1
+                ]
+            }
+        ]
     }
 ]
