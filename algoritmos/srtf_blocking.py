@@ -103,7 +103,7 @@ def srtf_blocking(process_list):
             seg_start = None
             continue
 
-        eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.ready_since or x.arrival_time, x.pid))
+        eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.arrival_time, x._seq, x.pid))
         candidate = eligibles[0]
 
         if current is not candidate:
@@ -151,7 +151,7 @@ def srtf_blocking(process_list):
 
         eligibles = [p for p in ready if p.is_cpu_burst() and not p.is_finished()]
         if eligibles:
-            eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.ready_since or x.arrival_time, x.pid))
+            eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.arrival_time, x._seq, x.pid))
             best = eligibles[0]
             if best is not current and best.get_total_cpu_remaining() < current.get_total_cpu_remaining():
                 gantt.append((current.pid, seg_start, time, "CPU"))
