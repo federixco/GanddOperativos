@@ -9,7 +9,7 @@ class DataInputScreen(ctk.CTkFrame):
         self.on_continue = on_continue
 
         # Estructura de datos para múltiples ráfagas
-        self.process_data = {}  # {nombre: {"arrival": int, "bursts": [int, int, ...]}}
+        self.process_data = {}  # {nombre: {"arrival": int, "priority": int, "bursts": [int, int, ...]}}
         
         self.label_title = ctk.CTkLabel(self, text="Ingresar datos de procesos", font=("Arial", 18, "bold"))
         self.label_title.pack(pady=20)
@@ -40,6 +40,7 @@ class DataInputScreen(ctk.CTkFrame):
             # Inicializar datos del proceso
             self.process_data[nombre] = {
                 "arrival": None,
+                "priority": 0,  # Prioridad por defecto
                 "bursts": []
             }
             
@@ -60,6 +61,18 @@ class DataInputScreen(ctk.CTkFrame):
             ctk.CTkLabel(arrival_frame, text="Tiempo de llegada:", width=120).pack(side="left", padx=5)
             arrival_entry = ctk.CTkEntry(arrival_frame, placeholder_text="Ej: 0", width=80)
             arrival_entry.pack(side="left", padx=5)
+            
+            # Prioridad
+            priority_frame = ctk.CTkFrame(process_frame)
+            priority_frame.pack(fill="x", padx=5, pady=2)
+            
+            ctk.CTkLabel(priority_frame, text="Prioridad (0-9):", width=120).pack(side="left", padx=5)
+            priority_entry = ctk.CTkEntry(priority_frame, placeholder_text="Ej: 5", width=80)
+            priority_entry.pack(side="left", padx=5)
+            
+            # Tooltip para explicar prioridades
+            ctk.CTkLabel(priority_frame, text="(9=mayor prioridad, 0=menor prioridad)", 
+                        font=("Arial", 10), text_color="gray").pack(side="left", padx=10)
             
             # Frame para las ráfagas
             bursts_frame = ctk.CTkFrame(process_frame)
@@ -82,6 +95,7 @@ class DataInputScreen(ctk.CTkFrame):
             
             # Almacenar referencias para este proceso
             self.process_data[nombre]["arrival_entry"] = arrival_entry
+            self.process_data[nombre]["priority_entry"] = priority_entry
             self.process_data[nombre]["bursts_display_frame"] = bursts_display_frame
             self.process_data[nombre]["burst_entries"] = []
             
@@ -186,6 +200,15 @@ class DataInputScreen(ctk.CTkFrame):
                 if arrival_time < 0:
                     raise ValueError(f"Proceso {nombre}: Tiempo de llegada debe ser ≥ 0")
                 
+                # Validar prioridad
+                priority_str = process_info["priority_entry"].get().strip()
+                if not priority_str:
+                    priority = 0  # Prioridad por defecto
+                else:
+                    priority = int(priority_str)
+                    if priority < 0 or priority > 9:
+                        raise ValueError(f"Proceso {nombre}: Prioridad debe estar entre 0 y 9")
+                
                 # Validar ráfagas
                 burst_entries = process_info["burst_entries"]
                 if not burst_entries:
@@ -219,6 +242,7 @@ class DataInputScreen(ctk.CTkFrame):
                 procesos_data.append({
                     "pid": nombre, 
                     "arrival_time": arrival_time, 
+                    "priority": priority,
                     "bursts": bursts
                 })
 
@@ -275,6 +299,10 @@ class DataInputScreen(ctk.CTkFrame):
                     arrival_str = process_info["arrival_entry"].get().strip()
                     arrival = int(arrival_str) if arrival_str else 0
                     
+                    # Obtener prioridad
+                    priority_str = process_info["priority_entry"].get().strip()
+                    priority = int(priority_str) if priority_str else 0
+                    
                     # Obtener ráfagas
                     bursts = []
                     for burst_info in process_info["burst_entries"]:
@@ -285,6 +313,7 @@ class DataInputScreen(ctk.CTkFrame):
                     config_procesos.append({
                         "nombre": nombre_proceso,
                         "arrival": arrival,
+                        "priority": priority,
                         "bursts": bursts
                     })
                 
@@ -454,6 +483,11 @@ class DataInputScreen(ctk.CTkFrame):
                         process_info["arrival_entry"].delete(0, "end")
                         process_info["arrival_entry"].insert(0, str(proceso_config["arrival"]))
                     
+                    # Aplicar prioridad (si existe en la configuración, sino usar 0)
+                    priority = proceso_config.get("priority", 0)
+                    process_info["priority_entry"].delete(0, "end")
+                    process_info["priority_entry"].insert(0, str(priority))
+                    
                     # Aplicar ráfagas
                     bursts = proceso_config["bursts"]
                     if bursts:
@@ -484,6 +518,9 @@ class DataInputScreen(ctk.CTkFrame):
                 
                 # Limpiar tiempo de llegada
                 process_info["arrival_entry"].delete(0, "end")
+                
+                # Limpiar prioridad
+                process_info["priority_entry"].delete(0, "end")
                 
                 # Limpiar ráfagas
                 for burst_info in process_info["burst_entries"][:]:

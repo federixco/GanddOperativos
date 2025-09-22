@@ -16,6 +16,9 @@ from algoritmos.fifo_blocking import fifo_blocking
 from algoritmos.sjf_blocking import sjf_blocking
 from algoritmos.srtf_blocking import srtf_blocking
 from algoritmos.round_robin_blocking import round_robin_blocking
+# Algoritmos de prioridades
+from algoritmos.priority import priority
+from algoritmos.priority_blocking import priority_blocking
 
 from utils.metricas import calcular_metricas
 from utils.excel_export import exportar_a_excel
@@ -48,11 +51,30 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.pan_start_y = None
         self.is_panning = False
 
+        # --- Detectar uso de prioridades ---
+        self.usar_prioridades = self._detectar_uso_prioridades()
+
         # --- Selección de algoritmo ---
         self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
         self.label_title.pack(pady=10)
+        
+        # --- Indicador de prioridades ---
+        if self.usar_prioridades:
+            self.label_prioridades = ctk.CTkLabel(self, text="ℹ️ Ejercicio con prioridades detectado", 
+                                                font=("Arial", 12), text_color="blue")
+        else:
+            self.label_prioridades = ctk.CTkLabel(self, text="ℹ️ Ejercicio sin prioridades", 
+                                                font=("Arial", 12), text_color="gray")
+        self.label_prioridades.pack(pady=2)
 
-        self.algoritmos = ["FIFO", "SJF", "SRTF", "Round Robin"]
+        # Lista base de algoritmos (siempre disponibles)
+        self.algoritmos_base = ["FIFO", "SJF", "SRTF", "Round Robin"]
+        
+        # Algoritmos de prioridades (solo si se usan prioridades)
+        if self.usar_prioridades:
+            self.algoritmos = self.algoritmos_base + ["Prioridades", "Prioridades con Bloqueos"]
+        else:
+            self.algoritmos = self.algoritmos_base
         self.selected_algo = ctk.StringVar(value=self.algoritmos[0])
         self.option_menu = ctk.CTkOptionMenu(
             self, values=self.algoritmos, variable=self.selected_algo, command=self._on_algo_change
@@ -119,8 +141,13 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.entry_quantum.pack(side="left", padx=5)
 
         # --- Tabla BCP ---
-        self.tree = ttk.Treeview(self, columns=("PID", "Llegada", "CPU", "TR", "TE"), show="headings", height=8)
-        for col in ("PID", "Llegada", "CPU", "TR", "TE"):
+        if self.usar_prioridades:
+            columns = ("PID", "Llegada", "Prioridad", "CPU", "TR", "TE")
+        else:
+            columns = ("PID", "Llegada", "CPU", "TR", "TE")
+            
+        self.tree = ttk.Treeview(self, columns=columns, show="headings", height=8)
+        for col in columns:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=80, anchor="center")
         self.tree.pack(pady=10, fill="x")
@@ -133,6 +160,13 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.frame_gantt = ctk.CTkFrame(self)
         self.frame_gantt.pack(pady=10, fill="both", expand=True)
 
+    def _detectar_uso_prioridades(self):
+        """Detecta si algún proceso tiene prioridad > 0 (diferente a la prioridad por defecto)."""
+        for proceso in self.procesos_data:
+            if proceso.get("priority", 0) > 0:
+                return True
+        return False
+
     def _on_algo_change(self, value):
         if value == "Round Robin":
             self.frame_quantum.pack(before=self.tree, pady=5)
@@ -142,7 +176,7 @@ class AlgorithmScreen(ctk.CTkFrame):
     def _run_algorithm(self):
         # Crear copias de los procesos para no modificar los originales
         from copy import deepcopy
-        procesos = [Process(p["pid"], p["arrival_time"], p["bursts"]) for p in self.procesos_data]
+        procesos = [Process(p["pid"], p["arrival_time"], p["bursts"], p.get("priority", 0)) for p in self.procesos_data]
         algo = self.selected_algo.get()
 
         try:
@@ -162,6 +196,15 @@ class AlgorithmScreen(ctk.CTkFrame):
                     gantt, result = round_robin_blocking(procesos, quantum)
                 else:
                     gantt, result = round_robin(procesos, quantum)
+            elif algo == "Prioridades":
+                # Detectar si los procesos tienen bloqueos
+                tiene_bloqueos = any(len(p["bursts"]) > 1 for p in self.procesos_data)
+                if tiene_bloqueos:
+                    gantt, result = priority_blocking(procesos)
+                else:
+                    gantt, result = priority(procesos)
+            elif algo == "Prioridades con Bloqueos":
+                gantt, result = priority_blocking(procesos)
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error al ejecutar: {e}")
             return
@@ -173,7 +216,13 @@ class AlgorithmScreen(ctk.CTkFrame):
         for row in self.tree.get_children():
             self.tree.delete(row)
         for m in metricas:
-            self.tree.insert("", "end", values=(m["PID"], m["Llegada"], m["CPU"], m["TR"], m["TE"]))
+            if self.usar_prioridades:
+                # Obtener la prioridad del proceso original
+                priority = next((p.get("priority", 0) for p in self.procesos_data if p["pid"] == m["PID"]), 0)
+                self.tree.insert("", "end", values=(m["PID"], m["Llegada"], priority, m["CPU"], m["TR"], m["TE"]))
+            else:
+                # Sin columna de prioridad
+                self.tree.insert("", "end", values=(m["PID"], m["Llegada"], m["CPU"], m["TR"], m["TE"]))
 
         # Actualizar promedios
         self.label_promedios.configure(
