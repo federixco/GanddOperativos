@@ -1,6 +1,6 @@
 # GanddOperativos/models/process.py
 class Process:
-    def __init__(self, pid, arrival_time, bursts):
+    def __init__(self, pid, arrival_time, bursts, priority=0):
         """
         Representa un proceso con ráfagas de CPU y bloqueos (E/S).
 
@@ -8,6 +8,7 @@ class Process:
         :param arrival_time: Tiempo de llegada inicial al sistema
         :param bursts: Lista de enteros, índices pares = CPU, impares = bloqueo
                        Ej: [3, 2, 5] => CPU 3, Bloqueo 2, CPU 5
+        :param priority: Prioridad del proceso (entero, mayor número = mayor prioridad)
         """
         self.pid = pid
         self.arrival_time = arrival_time
@@ -15,6 +16,7 @@ class Process:
         self.bursts_original = bursts[:]     # copia inmutable para métricas
         self.current_burst_index = 0
         self.remaining_time = bursts[0] if bursts else 0
+        self.priority = priority             # Prioridad del proceso (mayor número = mayor prioridad)
 
         # Métricas
         self.start_time = None
@@ -125,5 +127,5 @@ class Process:
 
     def __repr__(self):
         return (f"Process(pid={self.pid}, arrival={self.arrival_time}, bursts={self.bursts}, "
-                f"idx={self.current_burst_index}, start={self.start_time}, completion={self.completion_time}, "
-                f"TR={self.turnaround_time}, TE={self.waiting_time})")
+                f"priority={self.priority}, idx={self.current_burst_index}, start={self.start_time}, "
+                f"completion={self.completion_time}, TR={self.turnaround_time}, TE={self.waiting_time})")

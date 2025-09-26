@@ -103,49 +103,82 @@ from copy import deepcopy
 
 def fifo(process_list):
     """
-    FIFO no expulsivo sin bloqueos.
-    Usa Process con bursts=[CPU] y remaining_time inicializado.
-    Devuelve gantt en 3-tuplas: (pid, start, end).
+    ALGORITMO FIFO (First In, First Out) - NO EXPULSIVO SIN BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en el orden de llegada (FIFO)
+    - Una vez que un proceso comienza a ejecutarse, no puede ser interrumpido
+    - No hay bloqueos de E/S, solo ráfagas de CPU
+    - Cada proceso tiene una sola ráfaga de CPU que se ejecuta completamente
+    
+    CARACTERÍSTICAS:
+    - No expulsivo: no hay preempción
+    - Sin bloqueos: no hay operaciones de E/S
+    - Simple y justo: el primero en llegar es el primero en ejecutarse
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU]
+    
+    RETORNA:
+    - gantt: Lista de tuplas (pid, start, end) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
     """
+    
     # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
-    time = 0  # Reloj del sistema
+    
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
     gantt = []  # Lista para almacenar el diagrama de Gantt
-    ready = []  # Cola de procesos listos para ejecutar
+    ready = []  # Cola de procesos listos para ejecutar (FIFO)
     completed = 0  # Contador de procesos completados
-    n = len(processes)  # Total de procesos
+    n = len(processes)  # Total de procesos a procesar
 
-    # Ordenar por llegada para consistencia (no obligatorio)
+    # Ordenar procesos por tiempo de llegada para consistencia
+    # Esto asegura que si hay empates en llegada, se mantenga un orden predecible
     processes.sort(key=lambda p: p.arrival_time)
 
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
     while completed < n:  # Mientras no se completen todos los procesos
-        # Encolar llegadas al tiempo actual
+        
+        # FASE 1: ENCOLAR LLEGADAS
+        # Revisar todos los procesos para ver cuáles han llegado al tiempo actual
         for p in processes:
-            # Verificar si el proceso:
+            # Verificar si el proceso cumple todas las condiciones para ser encolado:
             # - No ha empezado a ejecutarse (start_time is None)
             # - Ya llegó al sistema (arrival_time <= time)
             # - No está ya en la cola de listos
             # - No ha terminado (completion_time is None)
             if p.start_time is None and p.arrival_time <= time and p not in ready and p.completion_time is None:
-                ready.append(p)  # Agregar a la cola de listos
+                ready.append(p)  # Agregar a la cola de listos (al final de la cola)
 
+        # FASE 2: EJECUTAR PROCESO
         if ready:  # Si hay procesos listos para ejecutar
-            current = ready.pop(0)  # Tomar el primero de la cola (FIFO)
+            
+            # Seleccionar proceso: FIFO = First In, First Out
+            current = ready.pop(0)  # Tomar el primero de la cola (el que llegó primero)
+            
+            # Marcar tiempo de inicio si es la primera vez que se ejecuta
             if current.start_time is None:  # Si es la primera vez que se ejecuta
-                current.start_time = time  # Marcar tiempo de inicio
+                current.start_time = time  # Marcar tiempo de inicio del proceso
 
+            # Ejecutar el proceso completamente (FIFO es no expulsivo)
             start = time  # Guardar tiempo de inicio de esta ejecución
             cpu = current.remaining_time  # Tiempo de CPU restante (equivale a bursts[0])
-            time += cpu  # Avanzar el reloj del sistema
+            time += cpu  # Avanzar el reloj del sistema por el tiempo de CPU completo
             gantt.append((current.pid, start, time))  # Registrar en el diagrama de Gantt
 
+            # Marcar proceso como completado
             current.completion_time = time  # Marcar tiempo de finalización
-            current.calculate_metrics()  # Calcular métricas del proceso
-            completed += 1  # Incrementar contador de completados
+            current.calculate_metrics()  # Calcular métricas del proceso (TR, TE, etc.)
+            completed += 1  # Incrementar contador de procesos completados
+            
         else:
-            # No hay procesos listos: avanzar 1 unidad de tiempo y reintentar
+            # No hay procesos listos: CPU ociosa
+            # Avanzar 1 unidad de tiempo y reintentar en la siguiente iteración
             time += 1
 
+    # Retornar resultados de la simulación
     return gantt, processes
 
 
@@ -157,15 +190,43 @@ Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\fifo_blo
 from copy import deepcopy
 
 def fifo_blocking(process_list):
+    """
+    ALGORITMO FIFO (First In, First Out) - NO EXPULSIVO CON BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en el orden de llegada (FIFO)
+    - Una vez que un proceso comienza a ejecutarse, no puede ser interrumpido
+    - Los procesos pueden tener múltiples ráfagas de CPU y E/S (bloqueos)
+    - Cuando un proceso termina una ráfaga de CPU, puede ir a bloqueo o continuar con otra CPU
+    - Cuando un proceso termina un bloqueo, regresa a la cola de listos
+    - Se respeta la prioridad: procesos que terminan CPU tienen prioridad sobre los que salen de bloqueo
+    
+    CARACTERÍSTICAS:
+    - No expulsivo: no hay preempción una vez que comienza la ejecución
+    - Con bloqueos: maneja operaciones de E/S (Entrada/Salida)
+    - Simple y justo: el primero en llegar es el primero en ejecutarse
+    - Maneja múltiples ráfagas: CPU → E/S → CPU → E/S → ...
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU, E/S, CPU, E/S, ...]
+    
+    RETORNA:
+    - gantt_chart: Lista de tuplas (pid, start, end, tipo) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
+    """
+    
     # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
-    time = 0  # Reloj del sistema
+    
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
     gantt_chart = []  # Lista para almacenar el diagrama de Gantt
-    ready_queue = []  # Cola de procesos listos para ejecutar
+    ready_queue = []  # Cola de procesos listos para ejecutar (FIFO)
     blocked_queue = []  # Cola de procesos bloqueados: (proceso, unblock_time)
     completed = 0  # Contador de procesos completados
-    n = len(processes)  # Total de procesos
+    n = len(processes)  # Total de procesos a procesar
 
+    # Variables para controlar la ejecución actual
     current = None  # Proceso actualmente en ejecución
     start_time = None  # Tiempo de inicio del bloque actual en Gantt
 
@@ -174,10 +235,13 @@ def fifo_blocking(process_list):
     enq_cpu = []      # procesos que entran a ready por llegada o por terminar CPU
     enq_unblock = []  # procesos que entran a ready por desbloqueo
 
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
     while completed < n:  # Mientras no se completen todos los procesos
-        # 1) Llegadas - Procesar procesos que llegan en este momento
+        
+        # FASE 1: PROCESAR LLEGADAS
+        # Buscar procesos que llegan exactamente en este momento
         for p in processes:
-            # Verificar si el proceso:
+            # Verificar si el proceso cumple todas las condiciones para ser procesado:
             # - Llega exactamente en este momento (arrival_time == time)
             # - No ha terminado (completion_time is None)
             # - No está ya en la cola de listos
@@ -193,14 +257,15 @@ def fifo_blocking(process_list):
                 and p not in enq_cpu  # evitar duplicado si llega y ya está en buffer
                 and p not in enq_unblock
             ):
+                # Determinar qué tipo de ráfaga tiene el proceso al llegar
                 if p.is_cpu_burst():  # Si la primera ráfaga es de CPU
                     enq_cpu.append(p)  # PRIORIDAD: llegan a ready como CPU_FINISH
                 else:  # Si la primera ráfaga es de bloqueo
                     dur = p.bursts[p.current_burst_index]  # Duración del bloqueo
                     if dur > 0:  # Si el bloqueo tiene duración
-                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))  # Registrar bloqueo
+                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))  # Registrar bloqueo en Gantt
                         blocked_queue.append((p, time + dur))  # Agregar a cola de bloqueados
-                    else:  # Si el bloqueo es de duración 0
+                    else:  # Si el bloqueo es de duración 0 (bloqueo instantáneo)
                         p.advance_burst()  # Avanzar a la siguiente ráfaga
                         if p.current_burst_index >= len(p.bursts):  # Si terminó el proceso
                             p.completion_time = time
@@ -217,7 +282,8 @@ def fifo_blocking(process_list):
                                 if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
                                     enq_cpu.append(p)
 
-        # 2) Desbloqueos que vencen ahora - Procesar procesos que terminan su bloqueo
+        # FASE 2: PROCESAR DESBLOQUEOS
+        # Buscar procesos que terminan su bloqueo en este momento
         for (bp, unblock_time) in blocked_queue[:]:  # Iterar sobre una copia de la lista
             if unblock_time == time:  # Si el bloqueo termina en este momento
                 blocked_queue.remove((bp, unblock_time))  # Remover de la cola de bloqueados
@@ -241,40 +307,43 @@ def fifo_blocking(process_list):
                             elif bp.is_cpu_burst():  # Si la siguiente es CPU
                                 enq_unblock.append(bp)
 
+        # FASE 3: VOLCAR BUFFERS A COLA DE LISTOS
         # Mezclar en ready con la prioridad requerida: primero enq_cpu, luego enq_unblock
         if enq_cpu or enq_unblock:  # Si hay procesos en los buffers
-            ready_queue.extend(enq_cpu)  # Agregar procesos de CPU primero
-            ready_queue.extend(enq_unblock)  # Luego los de desbloqueo
+            ready_queue.extend(enq_cpu)  # Agregar procesos de CPU primero (mayor prioridad)
+            ready_queue.extend(enq_unblock)  # Luego los de desbloqueo (menor prioridad)
             enq_cpu.clear()  # Limpiar buffer de CPU
             enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
-        # 3) Selección FIFO - Elegir proceso para ejecutar
+        # FASE 4: SELECCIÓN DE PROCESO (CRITERIO FIFO)
+        # Elegir proceso para ejecutar si no hay uno ejecutando
         if current is None and ready_queue:  # Si no hay proceso ejecutando y hay listos
             current = ready_queue.pop(0)  # Tomar el primero de la cola (FIFO)
-            start_time = time  # Marcar inicio del bloque
+            start_time = time  # Marcar inicio del bloque en Gantt
             if current.start_time is None:  # Si es la primera vez que se ejecuta
                 current.start_time = time  # solo la primera vez que toca CPU
 
-        # 4) Ejecutar 1 tick de CPU o avanzar tiempo si no hay listos
+        # FASE 5: EJECUTAR PROCESO O AVANZAR TIEMPO
         if current:  # Si hay un proceso ejecutando
-            current.remaining_time -= 1  # Reducir tiempo restante
+            # Ejecutar 1 tick de CPU
+            current.remaining_time -= 1  # Reducir tiempo restante del proceso
             time += 1  # Avanzar el reloj del sistema
 
-            # ¿Terminó esta ráfaga de CPU?
+            # FASE 6: VERIFICAR SI TERMINÓ LA RÁFAGA DE CPU
             if current.remaining_time == 0:  # Si terminó la ráfaga de CPU
-                # Cerrar tramo de CPU
+                # Cerrar tramo de CPU en el diagrama de Gantt
                 gantt_chart.append((current.pid, start_time, time, "CPU"))
 
                 # Avanzar a la siguiente ráfaga
                 current.advance_burst()
 
-                # ¿Proceso terminado?
+                # FASE 7: DETERMINAR QUÉ HACER CON EL PROCESO
                 if current.current_burst_index >= len(current.bursts):  # Si terminó el proceso
                     current.completion_time = time
                     completed += 1
                     current = None  # Liberar CPU
                 else:
-                    # ¿Siguiente es CPU?
+                    # Verificar qué tipo de ráfaga sigue
                     if current.is_cpu_burst():  # Si la siguiente ráfaga es de CPU
                         # Entra a ready como "CPU_FINISH" (prioridad sobre UNBLOCK si coincide el instante)
                         enq_cpu.append(current)
@@ -286,7 +355,7 @@ def fifo_blocking(process_list):
                             gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
                             blocked_queue.append((current, time + dur))
                             current = None  # Liberar CPU
-                        else:  # Si es de duración 0
+                        else:  # Si es de duración 0 (bloqueo instantáneo)
                             # Bloqueo de 0 → saltar
                             current.advance_burst()
                             if current.current_burst_index >= len(current.bursts):  # Si terminó
@@ -297,6 +366,7 @@ def fifo_blocking(process_list):
                                 enq_cpu.append(current)
                                 current = None
 
+            # FASE 8: VOLCAR BUFFERS DESPUÉS DE EJECUTAR
             # Tras terminar el tick, antes de próxima selección, volcamos buffers con prioridad
             if enq_cpu or enq_unblock:  # Si hay procesos en los buffers
                 ready_queue.extend(enq_cpu)  # Agregar procesos de CPU primero
@@ -307,7 +377,315 @@ def fifo_blocking(process_list):
             # No hay proceso ejecutando ni listo: avanzar tiempo "vacío" (no pintamos IDLE)
             time += 1
 
+    # Retornar resultados de la simulación
     return gantt_chart, processes
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\priority.py
+
+...-------------------...
+from copy import deepcopy
+
+def priority(process_list):
+    """
+    ALGORITMO DE PRIORIDADES - NO EXPULSIVO SIN BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en orden de prioridad (mayor número = mayor prioridad)
+    - Una vez que un proceso comienza a ejecutarse, no puede ser interrumpido
+    - No hay bloqueos de E/S, solo ráfagas de CPU
+    - Cada proceso tiene una sola ráfaga de CPU que se ejecuta completamente
+    - En caso de empate de prioridad, se aplica FIFO (orden de llegada)
+    
+    CARACTERÍSTICAS:
+    - No expulsivo: no hay preempción una vez que comienza la ejecución
+    - Sin bloqueos: no hay operaciones de E/S
+    - Basado en prioridades: mayor número = mayor prioridad
+    - Desempate FIFO: en caso de empate de prioridad, el primero en llegar se ejecuta primero
+    - Puede causar inanición: procesos de baja prioridad pueden esperar indefinidamente
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU] y priority asignada
+    
+    RETORNA:
+    - gantt: Lista de tuplas (pid, start, end) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
+    """
+    
+    # Crear copia profunda para no modificar la lista original
+    processes = deepcopy(process_list)
+    
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
+    gantt = []  # Lista para almacenar el diagrama de Gantt
+    completed = 0  # Contador de procesos completados
+    n = len(processes)  # Total de procesos a procesar
+
+    # Verificar que los procesos tengan prioridad asignada
+    for p in processes:
+        # Verificar que el proceso tenga prioridad asignada (por defecto es 0)
+        if not hasattr(p, 'priority'):
+            p.priority = 0
+
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
+    while completed < n:  # Mientras no se completen todos los procesos
+        
+        # FASE 1: IDENTIFICAR PROCESOS ELEGIBLES
+        # Buscar procesos que han llegado y no han terminado
+        elegibles = [p for p in processes if p.arrival_time <= time and p.completion_time is None]
+
+        # FASE 2: MANEJAR CPU OCIOSA
+        if not elegibles:  # Si no hay procesos elegibles
+            time += 1  # Avanzar tiempo y continuar en la siguiente iteración
+            continue
+
+        # FASE 3: SELECCIÓN DE PROCESO (CRITERIO DE PRIORIDADES)
+        # Ordenar por prioridad (mayor número = mayor prioridad), luego FIFO en empates
+        elegibles.sort(key=lambda p: (
+            -p.priority,  # Prioridad descendente (mayor número primero)
+            p.arrival_time,  # FIFO en empates (menor tiempo de llegada primero)
+            p.pid  # Estabilidad (desempate por PID)
+        ))
+        
+        # Seleccionar el proceso con mayor prioridad
+        current = elegibles[0]  # Tomar el proceso con mayor prioridad
+
+        # FASE 4: EJECUTAR PROCESO COMPLETAMENTE
+        # Marcar tiempo de inicio si es la primera vez que se ejecuta
+        if current.start_time is None:  # Si es la primera vez que se ejecuta
+            current.start_time = time  # Marcar tiempo de inicio del proceso
+
+        # Ejecutar el proceso completamente (algoritmo de prioridades es no expulsivo)
+        start = time  # Guardar tiempo de inicio de esta ejecución
+        cpu = current.remaining_time  # Tiempo de CPU restante (equivale a bursts[0])
+        time += cpu  # Avanzar el reloj del sistema por el tiempo de CPU completo
+        gantt.append((current.pid, start, time))  # Registrar en el diagrama de Gantt
+
+        # FASE 5: MARCAR PROCESO COMO COMPLETADO
+        current.completion_time = time  # Marcar tiempo de finalización
+        current.calculate_metrics()  # Calcular métricas del proceso (TR, TE, etc.)
+        completed += 1  # Incrementar contador de procesos completados
+
+    # Retornar resultados de la simulación
+    return gantt, processes
+
+
+
+...-------------------...
+Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\priority_blocking.py
+
+...-------------------...
+from copy import deepcopy
+
+def priority_blocking(process_list):
+    """
+    ALGORITMO DE PRIORIDADES - NO EXPULSIVO CON BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en orden de prioridad (mayor número = mayor prioridad)
+    - Una vez que un proceso comienza a ejecutarse, no puede ser interrumpido
+    - Los procesos pueden tener múltiples ráfagas de CPU y E/S (bloqueos)
+    - Cuando un proceso termina una ráfaga de CPU, puede ir a bloqueo o continuar con otra CPU
+    - Cuando un proceso termina un bloqueo, regresa a la cola de listos
+    - Se respeta la prioridad: procesos que terminan CPU tienen prioridad sobre los que salen de bloqueo
+    - En caso de empate de prioridad, se aplica FIFO (orden de llegada)
+    
+    CARACTERÍSTICAS:
+    - No expulsivo: no hay preempción una vez que comienza la ejecución
+    - Con bloqueos: maneja operaciones de E/S (Entrada/Salida)
+    - Basado en prioridades: mayor número = mayor prioridad
+    - Desempate FIFO: en caso de empate de prioridad, el primero en llegar se ejecuta primero
+    - Maneja múltiples ráfagas: CPU → E/S → CPU → E/S → ...
+    - Puede causar inanición: procesos de baja prioridad pueden esperar indefinidamente
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU, E/S, CPU, E/S, ...] y priority asignada
+    
+    RETORNA:
+    - gantt_chart: Lista de tuplas (pid, start, end, tipo) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
+    """
+    
+    # Crear copia profunda para no modificar la lista original
+    processes = deepcopy(process_list)
+    
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
+    gantt_chart = []  # Lista para almacenar el diagrama de Gantt
+    ready_queue = []  # Cola de procesos listos para ejecutar
+    blocked_queue = []  # Cola de procesos bloqueados: (proceso, unblock_time)
+    completed = 0  # Contador de procesos completados
+    n = len(processes)  # Total de procesos a procesar
+
+    # Variables para controlar la ejecución actual
+    current = None  # Proceso actualmente en ejecución
+    start_time = None  # Tiempo de inicio del bloque actual en Gantt
+
+    # Buffers de encolado para respetar la prioridad:
+    # primero entran los que terminan CPU (CPU_FINISH), luego los que salen de BLOQ (UNBLOCK)
+    enq_cpu = []      # procesos que entran a ready por llegada o por terminar CPU
+    enq_unblock = []  # procesos que entran a ready por desbloqueo
+
+    # Verificar que los procesos tengan prioridad asignada
+    for p in processes:
+        if not hasattr(p, 'priority'):
+            p.priority = 0
+
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
+    while completed < n:  # Mientras no se completen todos los procesos
+        
+        # FASE 1: PROCESAR LLEGADAS
+        # Buscar procesos que llegan exactamente en este momento
+        for p in processes:
+            # Verificar si el proceso cumple todas las condiciones para ser procesado:
+            # - Llega exactamente en este momento (arrival_time == time)
+            # - No ha terminado (completion_time is None)
+            # - No está ya en la cola de listos
+            # - No está bloqueado
+            # - No es el proceso actual en ejecución
+            # - No está ya en los buffers de encolado
+            if (
+                p.arrival_time == time
+                and p.completion_time is None
+                and p not in ready_queue
+                and all(bp is not p for bp, _ in blocked_queue)
+                and p is not current
+                and p not in enq_cpu  # evitar duplicado si llega y ya está en buffer
+                and p not in enq_unblock
+            ):
+                # Determinar qué tipo de ráfaga tiene el proceso al llegar
+                if p.is_cpu_burst():  # Si la primera ráfaga es de CPU
+                    enq_cpu.append(p)  # PRIORIDAD: llegan a ready como CPU_FINISH
+                else:  # Si la primera ráfaga es de bloqueo
+                    dur = p.bursts[p.current_burst_index]  # Duración del bloqueo
+                    if dur > 0:  # Si el bloqueo tiene duración
+                        gantt_chart.append((p.pid, time, time + dur, "BLOCK"))  # Registrar bloqueo en Gantt
+                        blocked_queue.append((p, time + dur))  # Agregar a cola de bloqueados
+                    else:  # Si el bloqueo es de duración 0 (bloqueo instantáneo)
+                        p.advance_burst()  # Avanzar a la siguiente ráfaga
+                        if p.current_burst_index >= len(p.bursts):  # Si terminó el proceso
+                            p.completion_time = time
+                            completed += 1
+                        elif p.is_cpu_burst():  # Si la siguiente es CPU
+                            enq_cpu.append(p)  # entra por CPU
+                        else:  # Si la siguiente es otro bloqueo
+                            dur2 = p.bursts[p.current_burst_index]
+                            if dur2 > 0:  # Si tiene duración
+                                gantt_chart.append((p.pid, time, time + dur2, "BLOCK"))
+                                blocked_queue.append((p, time + dur2))
+                            else:  # Si es de duración 0
+                                p.advance_burst()
+                                if p.current_burst_index < len(p.bursts) and p.is_cpu_burst():
+                                    enq_cpu.append(p)
+
+        # FASE 2: PROCESAR DESBLOQUEOS
+        # Buscar procesos que terminan su bloqueo en este momento
+        for (bp, unblock_time) in blocked_queue[:]:  # Iterar sobre una copia de la lista
+            if unblock_time == time:  # Si el bloqueo termina en este momento
+                blocked_queue.remove((bp, unblock_time))  # Remover de la cola de bloqueados
+                bp.advance_burst()  # Avanzar a la siguiente ráfaga
+                if bp.current_burst_index >= len(bp.bursts):  # Si terminó el proceso
+                    bp.completion_time = time
+                    completed += 1
+                else:
+                    if bp.is_cpu_burst():  # Si la siguiente ráfaga es de CPU
+                        enq_unblock.append(bp)  # SALIDA DE BLOQ va detrás de CPU_FINISH
+                    else:  # Si la siguiente ráfaga es de bloqueo
+                        dur2 = bp.bursts[bp.current_burst_index]
+                        if dur2 > 0:  # Si tiene duración
+                            gantt_chart.append((bp.pid, time, time + dur2, "BLOCK"))
+                            blocked_queue.append((bp, time + dur2))
+                        else:  # Si es de duración 0
+                            bp.advance_burst()
+                            if bp.current_burst_index >= len(bp.bursts):  # Si terminó
+                                bp.completion_time = time
+                                completed += 1
+                            elif bp.is_cpu_burst():  # Si la siguiente es CPU
+                                enq_unblock.append(bp)
+
+        # FASE 3: VOLCAR BUFFERS A COLA DE LISTOS
+        # Mezclar en ready con la prioridad requerida: primero enq_cpu, luego enq_unblock
+        if enq_cpu or enq_unblock:  # Si hay procesos en los buffers
+            ready_queue.extend(enq_cpu)  # Agregar procesos de CPU primero (mayor prioridad)
+            ready_queue.extend(enq_unblock)  # Luego los de desbloqueo (menor prioridad)
+            enq_cpu.clear()  # Limpiar buffer de CPU
+            enq_unblock.clear()  # Limpiar buffer de desbloqueo
+
+        # FASE 4: SELECCIÓN DE PROCESO (CRITERIO DE PRIORIDADES)
+        # Elegir proceso para ejecutar si no hay uno ejecutando
+        if current is None and ready_queue:  # Si no hay proceso ejecutando y hay listos
+            # Ordenar por prioridad (mayor número = mayor prioridad), luego FIFO en empates
+            ready_queue.sort(key=lambda p: (
+                -p.priority,  # Prioridad descendente (mayor número primero)
+                p.arrival_time,  # FIFO en empates (menor tiempo de llegada primero)
+                p.pid  # Estabilidad (desempate por PID)
+            ))
+            
+            current = ready_queue.pop(0)  # Tomar el proceso con mayor prioridad
+            start_time = time  # Marcar inicio del bloque en Gantt
+            
+            # Marcar tiempo de inicio si es la primera vez que se ejecuta
+            if current.start_time is None:  # Si es la primera vez que se ejecuta
+                current.start_time = time  # solo la primera vez que toca CPU
+
+        # FASE 5: EJECUTAR PROCESO O AVANZAR TIEMPO
+        if current:  # Si hay un proceso ejecutando
+            # Ejecutar 1 tick de CPU
+            current.remaining_time -= 1  # Reducir tiempo restante del proceso
+            time += 1  # Avanzar el reloj del sistema
+
+            # FASE 6: VERIFICAR SI TERMINÓ LA RÁFAGA DE CPU
+            if current.remaining_time == 0:  # Si terminó la ráfaga de CPU
+                # Cerrar tramo de CPU en el diagrama de Gantt
+                gantt_chart.append((current.pid, start_time, time, "CPU"))
+
+                # Avanzar a la siguiente ráfaga
+                current.advance_burst()
+
+                # FASE 7: DETERMINAR QUÉ HACER CON EL PROCESO
+                if current.current_burst_index >= len(current.bursts):  # Si terminó el proceso
+                    current.completion_time = time
+                    completed += 1
+                    current = None  # Liberar CPU
+                else:
+                    # Verificar qué tipo de ráfaga sigue
+                    if current.is_cpu_burst():  # Si la siguiente ráfaga es de CPU
+                        # Entra a ready como "CPU_FINISH" (prioridad sobre UNBLOCK si coincide el instante)
+                        enq_cpu.append(current)
+                        current = None  # Liberar CPU
+                    else:  # Si la siguiente ráfaga es de bloqueo
+                        # Siguiente es BLOQUEO
+                        dur = current.bursts[current.current_burst_index]
+                        if dur > 0:  # Si tiene duración
+                            gantt_chart.append((current.pid, time, time + dur, "BLOCK"))
+                            blocked_queue.append((current, time + dur))
+                            current = None  # Liberar CPU
+                        else:  # Si es de duración 0 (bloqueo instantáneo)
+                            # Bloqueo de 0 → saltar
+                            current.advance_burst()
+                            if current.current_burst_index >= len(current.bursts):  # Si terminó
+                                current.completion_time = time
+                                completed += 1
+                                current = None
+                            elif current.is_cpu_burst():  # Si la siguiente es CPU
+                                enq_cpu.append(current)
+                                current = None
+
+            # FASE 8: VOLCAR BUFFERS DESPUÉS DE EJECUTAR
+            # Tras terminar el tick, antes de próxima selección, volcamos buffers con prioridad
+            if enq_cpu or enq_unblock:  # Si hay procesos en los buffers
+                ready_queue.extend(enq_cpu)  # Agregar procesos de CPU primero
+                ready_queue.extend(enq_unblock)  # Luego los de desbloqueo
+                enq_cpu.clear()  # Limpiar buffer de CPU
+                enq_unblock.clear()  # Limpiar buffer de desbloqueo
+        else:  # No hay proceso ejecutando
+            # No hay proceso ejecutando ni listo: avanzar tiempo "vacío" (no pintamos IDLE)
+            time += 1
+
+    # Retornar resultados de la simulación
+    return gantt_chart, processes
+
 
 
 ...-------------------...
@@ -318,86 +696,133 @@ from copy import deepcopy
 from collections import deque
 
 def round_robin(process_list, quantum):
+    """
+    ALGORITMO ROUND ROBIN (RR) - EXPULSIVO SIN BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en turnos de tiempo fijo (quantum)
+    - Cuando un proceso termina su quantum, se suspende y va al final de la cola
+    - El siguiente proceso en la cola toma el CPU
+    - Si un proceso termina antes de completar su quantum, libera el CPU inmediatamente
+    - No hay bloqueos de E/S, solo ráfagas de CPU
+    
+    CARACTERÍSTICAS:
+    - Expulsivo: los procesos pueden ser interrumpidos por el quantum
+    - Sin bloqueos: no hay operaciones de E/S
+    - Justo: todos los procesos reciben tiempo de CPU equitativo
+    - Responsivo: los procesos no esperan mucho tiempo para ejecutarse
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU]
+    - quantum: Tiempo máximo que un proceso puede ejecutarse continuamente
+    
+    RETORNA:
+    - gantt_chart: Lista de tuplas (pid, start, end) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
+    """
+    
     # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
-    n = len(processes)  # Total de procesos
-    time = 0  # Reloj del sistema
+    
+    # Inicializar variables del simulador
+    n = len(processes)  # Total de procesos a procesar
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
     completed = 0  # Contador de procesos completados
     gantt_chart = []  # Lista para almacenar el diagrama de Gantt
 
-    ready_queue = deque()  # Cola de procesos listos (FIFO con deque)
-    # Ordenar por tiempo de llegada, luego por PID para consistencia
+    # Estructuras de datos para Round Robin
+    ready_queue = deque()  # Cola de procesos listos (FIFO con deque para eficiencia)
+    
+    # Ordenar procesos por tiempo de llegada, luego por PID para consistencia
+    # Esto asegura un orden predecible cuando hay empates en llegada
     procesos_pendientes = sorted(processes, key=lambda p: (p.arrival_time, p.pid))
 
+    # Variables para controlar cambios de proceso en el diagrama de Gantt
     current_pid = None  # PID del proceso actualmente en ejecución
     start_time = None  # Tiempo de inicio del bloque actual en Gantt
 
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
     while completed < n:  # Mientras no se completen todos los procesos
-        # Agregar procesos que llegan en este instante
-        # Ordenar por PID para mantener consistencia
+        
+        # FASE 1: ENCOLAR LLEGADAS AL TIEMPO ACTUAL
+        # Buscar procesos que llegan exactamente en este momento
         procesos_que_llegan = []
         for p in procesos_pendientes:
-            # Verificar si el proceso:
+            # Verificar si el proceso cumple las condiciones para ser encolado:
             # - Llega exactamente en este momento (arrival_time == time)
             # - No está ya en la cola de listos
             # - Aún tiene tiempo restante para ejecutar
             if p.arrival_time == time and p not in ready_queue and p.remaining_time > 0:
                 procesos_que_llegan.append(p)
         
-        # Ordenar por PID y agregar al final de la cola
+        # Ordenar por PID para mantener consistencia y agregar al final de la cola
         procesos_que_llegan.sort(key=lambda p: p.pid)
         for p in procesos_que_llegan:
-            ready_queue.append(p)  # Agregar al final de la cola
+            ready_queue.append(p)  # Agregar al final de la cola (FIFO)
 
+        # FASE 2: EJECUTAR PROCESO
         if ready_queue:  # Si hay procesos listos para ejecutar
+            
+            # Seleccionar proceso: Round Robin = FIFO con quantum
             current = ready_queue.popleft()  # Tomar el primero de la cola
 
-            # Cambio de proceso en ejecución
+            # CONTROL DE CAMBIOS DE PROCESO EN GANTT
             if current_pid != current.pid:  # Si cambió el proceso
                 if current_pid is not None:  # Si había un proceso anterior
                     gantt_chart.append((current_pid, start_time, time))  # Cerrar bloque anterior
                 current_pid = current.pid  # Actualizar PID actual
                 start_time = time  # Marcar inicio del nuevo bloque
+                
+                # Marcar tiempo de inicio si es la primera vez que se ejecuta
                 if current.start_time is None:  # Si es la primera vez que se ejecuta
                     current.start_time = time  # Marcar tiempo de inicio del proceso
 
-            # Ejecutar hasta quantum o hasta que termine
+            # FASE 3: EJECUTAR PROCESO POR QUANTUM
+            # Ejecutar hasta quantum o hasta que termine (lo que ocurra primero)
             exec_time = min(quantum, current.remaining_time)  # Tiempo a ejecutar
-            current.remaining_time -= exec_time  # Reducir tiempo restante
+            current.remaining_time -= exec_time  # Reducir tiempo restante del proceso
             time += exec_time  # Avanzar el reloj del sistema
 
-            # Agregar procesos que llegaron durante la ejecución
+            # FASE 4: ENCOLAR LLEGADAS DURANTE LA EJECUCIÓN
+            # Buscar procesos que llegaron durante la ejecución del proceso actual
             procesos_nuevos = []
             for p in procesos_pendientes:
                 # Verificar si llegó durante la ejecución del proceso actual
+                # (entre time - exec_time y time)
                 if time - exec_time < p.arrival_time <= time and p.remaining_time > 0 and p not in ready_queue:
                     procesos_nuevos.append(p)
             
-            # Ordenar por PID y agregar al final
+            # Ordenar por PID y agregar al final de la cola
             procesos_nuevos.sort(key=lambda p: p.pid)
             for p in procesos_nuevos:
                 ready_queue.append(p)  # Agregar al final de la cola
 
+            # FASE 5: DECIDIR QUÉ HACER CON EL PROCESO ACTUAL
             if current.remaining_time > 0:  # Si el proceso no terminó
-                # Agregar el proceso actual al final si no terminó (Round Robin)
+                # Agregar el proceso actual al final de la cola (Round Robin)
+                # Esto implementa la rotación de procesos
                 ready_queue.append(current)
             else:  # Si el proceso terminó
                 current.completion_time = time  # Marcar tiempo de finalización
-                current.calculate_metrics()  # Calcular métricas del proceso
-                completed += 1  # Incrementar contador de completados
-        else:  # No hay procesos listos
-            # CPU ociosa
+                current.calculate_metrics()  # Calcular métricas del proceso (TR, TE, etc.)
+                completed += 1  # Incrementar contador de procesos completados
+                
+        else:  # No hay procesos listos: CPU ociosa
+            # CONTROL DE PERÍODOS IDLE EN GANTT
             if current_pid != "IDLE":  # Si no está marcado como IDLE
                 if current_pid is not None:  # Si había un proceso anterior
                     gantt_chart.append((current_pid, start_time, time))  # Cerrar bloque anterior
                 current_pid = "IDLE"  # Marcar como IDLE
                 start_time = time  # Marcar inicio del período IDLE
-            time += 1  # Avanzar tiempo sin ejecutar nada
+            
+            # Avanzar tiempo sin ejecutar nada
+            time += 1
 
-    # Cerrar el último bloque
+    # Cerrar el último bloque del diagrama de Gantt
     if current_pid is not None:
         gantt_chart.append((current_pid, start_time, time))
 
+    # Retornar resultados de la simulación
     return gantt_chart, processes
 
 
@@ -409,191 +834,338 @@ from copy import deepcopy
 from collections import deque
 
 def round_robin_blocking(process_list, quantum):
-    """Round Robin con bloqueos, ejecución por tramos (no tick a tick)."""
+    """
+    ALGORITMO ROUND ROBIN (RR) - EXPULSIVO CON BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en turnos de tiempo fijo (quantum)
+    - Cuando un proceso termina su quantum, se suspende y va al final de la cola
+    - El siguiente proceso en la cola toma el CPU
+    - Los procesos pueden tener múltiples ráfagas de CPU y E/S (bloqueos)
+    - Cuando un proceso termina una ráfaga de CPU, puede ir a bloqueo o continuar con otra CPU
+    - Cuando un proceso termina un bloqueo, regresa a la cola de listos
+    - Se respeta la prioridad: procesos que terminan CPU tienen prioridad sobre los que salen de bloqueo
+    
+    CARACTERÍSTICAS:
+    - Expulsivo: los procesos pueden ser interrumpidos por el quantum
+    - Con bloqueos: maneja operaciones de E/S (Entrada/Salida)
+    - Justo: todos los procesos reciben tiempo de CPU equitativo
+    - Responsivo: los procesos no esperan mucho tiempo para ejecutarse
+    - Maneja múltiples ráfagas: CPU → E/S → CPU → E/S → ...
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU, E/S, CPU, E/S, ...]
+    - quantum: Tiempo máximo que un proceso puede ejecutarse continuamente
+    
+    RETORNA:
+    - gantt: Lista de tuplas (pid, start, end, tipo) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
+    """
 
     def collapse_zeros(proc, t):
-        """Salta ráfagas 0 encadenadas; si termina, marca completion_time."""
+        """
+        FUNCIÓN AUXILIAR: Saltar ráfagas de duración 0 encadenadas.
+        
+        Si un proceso tiene ráfagas de duración 0, las salta automáticamente
+        hasta encontrar una ráfaga con duración > 0 o hasta que termine el proceso.
+        
+        Args:
+            proc: Proceso a procesar
+            t: Tiempo actual
+            
+        Returns:
+            bool: True si el proceso terminó, False si aún tiene ráfagas
+        """
+        # Saltar todas las ráfagas de duración 0 consecutivas
         while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
-            proc.advance_burst()
+            proc.advance_burst()  # Avanzar a la siguiente ráfaga
+        
+        # Verificar si el proceso terminó después de saltar ráfagas 0
         if proc.current_burst_index >= len(proc.bursts):
-            proc.completion_time = t
-            return True
-        return False
+            proc.completion_time = t  # Marcar tiempo de finalización
+            return True  # El proceso terminó
+        return False  # El proceso aún tiene ráfagas
 
-    def handle_post(proc, t, enq_cpu, enq_unblock, blocked, gantt):
+    def handle_after_cpu_or_arrival(proc, t, enq_cpu, blocked, gantt):
         """
-        Decide qué hacer tras cambiar de ráfaga:
-        - Si terminó → True
-        - Si CPU → enq_cpu
-        - Si BLOQ>0 → programa (BLOCK + blocked)
-        - Si BLOQ=0 → encadena recursivamente
+        FUNCIÓN AUXILIAR: Resolver transición tras llegada o fin de CPU.
+        
+        Determina qué hacer con un proceso después de que termina una ráfaga de CPU
+        o cuando llega al sistema. Puede ir a CPU, bloqueo, o terminar.
+        
+        Args:
+            proc: Proceso a procesar
+            t: Tiempo actual
+            enq_cpu: Buffer de procesos que van a CPU
+            blocked: Lista de procesos bloqueados
+            gantt: Lista del diagrama de Gantt
+            
+        Returns:
+            bool: True si el proceso terminó, False si continúa
         """
+        # Primero saltar ráfagas 0 si las hay
         if collapse_zeros(proc, t):
-            return True
-        if proc.is_cpu_burst():
-            enq_cpu.append(proc)
-        else:
-            dur = proc.bursts[proc.current_burst_index]
-            if dur > 0:
-                gantt.append((proc.pid, t, t + dur, "BLOCK"))
-                blocked.append((proc, t + dur))
-            else:
-                proc.advance_burst()
-                return handle_post(proc, t, enq_cpu, enq_unblock, blocked, gantt)
-        return False
+            return True  # El proceso terminó
+        
+        # Determinar qué tipo de ráfaga sigue
+        if proc.is_cpu_burst():  # Si la siguiente ráfaga es de CPU
+            enq_cpu.append(proc)  # Agregar al buffer de CPU (alta prioridad)
+        else:  # Si la siguiente ráfaga es de bloqueo
+            dur = proc.bursts[proc.current_burst_index]  # Duración del bloqueo
+            if dur > 0:  # Si tiene duración
+                gantt.append((proc.pid, t, t + dur, "BLOCK"))  # Registrar bloqueo en Gantt
+                blocked.append((proc, t + dur))  # Agregar a cola de bloqueados
+            else:  # Si es de duración 0 (bloqueo instantáneo)
+                proc.advance_burst()  # Avanzar a la siguiente ráfaga
+                # Llamar recursivamente para procesar la siguiente ráfaga
+                return handle_after_cpu_or_arrival(proc, t, enq_cpu, blocked, gantt)
+        return False  # El proceso continúa
 
+    def handle_after_unblock(proc, t, enq_unblock, blocked, gantt):
+        """
+        FUNCIÓN AUXILIAR: Resolver transición tras fin de bloqueo.
+        
+        Determina qué hacer con un proceso después de que termina un bloqueo.
+        Puede ir a CPU, otro bloqueo, o terminar.
+        
+        Args:
+            proc: Proceso a procesar
+            t: Tiempo actual
+            enq_unblock: Buffer de procesos que salen de bloqueo
+            blocked: Lista de procesos bloqueados
+            gantt: Lista del diagrama de Gantt
+            
+        Returns:
+            bool: True si el proceso terminó, False si continúa
+        """
+        # Primero saltar ráfagas 0 si las hay
+        if collapse_zeros(proc, t):
+            return True  # El proceso terminó
+        
+        # Determinar qué tipo de ráfaga sigue
+        if proc.is_cpu_burst():  # Si la siguiente ráfaga es de CPU
+            enq_unblock.append(proc)  # Agregar al buffer de desbloqueo (baja prioridad)
+        else:  # Si la siguiente ráfaga es de bloqueo
+            dur = proc.bursts[proc.current_burst_index]  # Duración del bloqueo
+            if dur > 0:  # Si tiene duración
+                gantt.append((proc.pid, t, t + dur, "BLOCK"))  # Registrar bloqueo en Gantt
+                blocked.append((proc, t + dur))  # Agregar a cola de bloqueados
+            else:  # Si es de duración 0 (bloqueo instantáneo)
+                proc.advance_burst()  # Avanzar a la siguiente ráfaga
+                # Llamar recursivamente para procesar la siguiente ráfaga
+                return handle_after_unblock(proc, t, enq_unblock, blocked, gantt)
+        return False  # El proceso continúa
+
+    # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
 
-    # Init: conservar remaining_time como duración de la ráfaga CPU actual (lo setea Process)
+    # FASE DE INICIALIZACIÓN
+    # Configurar atributos necesarios para cada proceso
     for idx, p in enumerate(processes):
+        # Guardar copia original de bursts para referencia
         if not hasattr(p, "bursts_original"):
             p.bursts_original = p.bursts[:]
+        
+        # Asignar secuencia para desempates
         p._seq = idx
-        p.ready_since = None
-        p.start_time = None
-        p.completion_time = None
+        
+        # Inicializar atributos de tiempo
+        p.ready_since = None  # Tiempo desde que está listo
+        p.start_time = None  # Tiempo de primera ejecución
+        p.completion_time = None  # Tiempo de finalización
+        
+        # Manejar procesos sin ráfagas (caso especial)
         if not p.bursts:
             p.current_burst_index = 0
             p.remaining_time = 0
             p.completion_time = 0
 
-    time = 0
-    gantt = []
-    ready = deque()
-    blocked = []                # [(proc, unblock_time)]
-    completed = sum(1 for p in processes if p.completion_time is not None)
-    n = len(processes)
-    arrived = set()
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
+    gantt = []  # Lista para almacenar el diagrama de Gantt
+    ready = deque()  # Cola de procesos listos (FIFO con deque para eficiencia)
+    blocked = []  # Lista de procesos bloqueados: (proceso, unblock_time)
+    completed = sum(1 for p in processes if p.completion_time is not None)  # Contador de completados
+    n = len(processes)  # Total de procesos a procesar
+    arrived = set()  # Conjunto de PIDs que ya llegaron al sistema
 
-    # Buffers con prioridad: CPU_FINISH/llegada > UNBLOCK
-    enq_cpu = []
-    enq_unblock = []
+    # Buffers de encolado para respetar la prioridad
+    enq_cpu = []      # procesos que entran a ready por llegada o por terminar CPU
+    enq_unblock = []  # procesos que entran a ready por desbloqueo
 
     def enqueue_arrivals_leq_t(t):
-        """Encola llegadas hasta t (incluido)."""
+        """
+        FUNCIÓN AUXILIAR: Encolar llegadas hasta tiempo t (incluido) con prioridad de llegada.
+        
+        Busca todos los procesos que han llegado al sistema hasta el tiempo t
+        y los procesa según su tipo de primera ráfaga.
+        
+        Args:
+            t: Tiempo hasta el cual buscar llegadas
+        """
         nonlocal completed
         for p in processes:
+            # Saltar procesos que ya llegaron
             if p.pid in arrived:
                 continue
+            
+            # Verificar si el proceso llegó y no ha terminado
             if p.arrival_time <= t and p.completion_time is None:
-                arrived.add(p.pid)
-                if handle_post(p, t, enq_cpu, enq_unblock, blocked, gantt):
+                arrived.add(p.pid)  # Marcar como llegado
+                # Procesar llegada usando la función auxiliar
+                if handle_after_cpu_or_arrival(p, t, enq_cpu, blocked, gantt):
                     completed += 1
 
-    # Llegadas iniciales
+    # PROCESAR LLEGADAS INICIALES
+    # Buscar procesos que llegan en tiempo 0
     enqueue_arrivals_leq_t(time)
+    
+    # Volcar buffers iniciales a la cola de listos
     if enq_cpu or enq_unblock:
-        ready.extend(enq_cpu); ready.extend(enq_unblock)
-        enq_cpu.clear(); enq_unblock.clear()
+        ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+        ready.extend(enq_unblock)  # Luego los de desbloqueo
+        enq_cpu.clear()  # Limpiar buffer de CPU
+        enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
-    while completed < n:
-        # Si no hay listos, saltar al siguiente evento
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
+    while completed < n:  # Mientras no se completen todos los procesos
+        
+        # FASE 1: MANEJAR CPU OCIOSA
+        # Si no hay procesos listos, saltar al siguiente evento
         if not ready:
+            # Buscar próximos eventos (llegadas y desbloqueos)
             future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived and p.completion_time is None]
             future_unblocks = [unb for _, unb in blocked]
+            
+            # Verificar si no hay más eventos futuros
             if not future_arrivals and not future_unblocks:
-                # Salvaguarda: marcar terminados sin completion_time
+                # Procesar procesos que terminaron sin completar
                 for p in processes:
                     if p.completion_time is None and p.current_burst_index >= len(p.bursts):
                         p.completion_time = time
                         completed += 1
-                break
-            next_event = min(future_arrivals + future_unblocks)
+                break  # Terminar simulación
+            
+            # Calcular el próximo evento
+            next_event = min(future_arrivals + future_unblocks) if (future_arrivals or future_unblocks) else time + 1
+            
+            # Avanzar tiempo hasta el próximo evento
             if next_event > time:
-                gantt.append(("IDLE", time, next_event, "IDLE"))
+                gantt.append(("IDLE", time, next_event, "IDLE"))  # Registrar período IDLE
                 time = next_event
             else:
                 time += 1
-            # Procesar todos los eventos en 'time'
-            # Desbloqueos exactamente en 'time'
-            for (bp, unb) in blocked[:]:
-                if unb == time:
-                    blocked.remove((bp, unb))
-                    bp.advance_burst()
-                    if handle_post(bp, time, enq_cpu, enq_unblock, blocked, gantt):
+
+            # FASE 2: PROCESAR EVENTOS EN EL TIEMPO ACTUAL
+            # Procesar desbloqueos que vencen en este momento
+            for (bp, unb) in blocked[:]:  # Iterar sobre una copia de la lista
+                if unb == time:  # Si el bloqueo termina en este momento
+                    blocked.remove((bp, unb))  # Remover de la cola de bloqueados
+                    bp.advance_burst()  # Avanzar a la siguiente ráfaga
+                    if handle_after_unblock(bp, time, enq_unblock, blocked, gantt):
                         completed += 1
-            # Llegadas en 'time'
+
+            # Procesar llegadas en este momento
             enqueue_arrivals_leq_t(time)
+            
+            # Volcar buffers a la cola de listos
             if enq_cpu or enq_unblock:
-                ready.extend(enq_cpu); ready.extend(enq_unblock)
-                enq_cpu.clear(); enq_unblock.clear()
-            if not ready:
-                continue
+                ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+                ready.extend(enq_unblock)  # Luego los de desbloqueo
+                enq_cpu.clear()  # Limpiar buffer de CPU
+                enq_unblock.clear()  # Limpiar buffer de desbloqueo
+            continue  # Volver al inicio del bucle
 
-        # Selección RR
+        # FASE 3: SELECCIÓN DE PROCESO (CRITERIO ROUND ROBIN)
+        # Seleccionar el primer proceso de la cola (FIFO)
         current = ready.popleft()
-        # Sólo CPU en ready; blindaje por si acaso
-        if not current.is_cpu_burst():
-            if handle_post(current, time, enq_cpu, enq_unblock, blocked, gantt):
-                completed += 1
-            if enq_cpu or enq_unblock:
-                ready.extend(enq_cpu); ready.extend(enq_unblock)
-                enq_cpu.clear(); enq_unblock.clear()
-            continue
 
+        # FASE 4: VERIFICAR TIPO DE RÁFAGA
+        # Si el proceso no está en una ráfaga de CPU, procesarlo
+        if not current.is_cpu_burst():
+            if handle_after_cpu_or_arrival(current, time, enq_cpu, blocked, gantt):
+                completed += 1
+            # Volcar buffers después de procesar
+            if enq_cpu or enq_unblock:
+                ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+                ready.extend(enq_unblock)  # Luego los de desbloqueo
+                enq_cpu.clear()  # Limpiar buffer de CPU
+                enq_unblock.clear()  # Limpiar buffer de desbloqueo
+            continue  # Volver al inicio del bucle
+
+        # FASE 5: MARCAR TIEMPO DE INICIO
+        # Marcar tiempo de inicio si es la primera vez que se ejecuta
         if current.start_time is None:
             current.start_time = time
-        # Sync si hiciera falta
-        if current.remaining_time <= 0:
-            current.remaining_time = current.bursts[current.current_burst_index]
 
-        # Tramo a ejecutar
+        # FASE 6: SINCRONIZAR TIEMPO RESTANTE
+        # IMPORTANTE: Sincronizar remaining_time con el burst actual
+        current.remaining_time = current.bursts[current.current_burst_index]
+
+        # FASE 7: CALCULAR TIEMPO DE EJECUCIÓN
+        # Definir tramo a ejecutar (quantum o tiempo restante, lo que sea menor)
         exec_time = min(quantum, current.remaining_time)
-        start = time
-        end = time + exec_time
+        start = time  # Tiempo de inicio de esta ejecución
+        end = time + exec_time  # Tiempo de fin de esta ejecución
 
-        # Registrar ejecuciones de otros eventos que ocurren en (time, end]
-        # - Desbloqueos
-        for (bp, unb) in sorted(blocked[:], key=lambda x: x[1]):
-            if time < unb <= end:
-                blocked.remove((bp, unb))
-                # Avanza ráfaga al instante unb
-                bp.advance_burst()
-                # Resolver en unb (no preempra al actual, solo prepara ready)
-                if handle_post(bp, unb, enq_cpu, enq_unblock, blocked, gantt):
+        # FASE 8: PROCESAR EVENTOS DURANTE LA EJECUCIÓN
+        # Procesar desbloqueos que ocurren durante la ejecución
+        for (bp, unb) in sorted(blocked[:], key=lambda x: x[1]):  # Ordenar por tiempo de desbloqueo
+            if time < unb <= end:  # Si el desbloqueo ocurre durante la ejecución
+                blocked.remove((bp, unb))  # Remover de la cola de bloqueados
+                bp.advance_burst()  # Avanzar a la siguiente ráfaga
+                if handle_after_unblock(bp, unb, enq_unblock, blocked, gantt):
                     completed += 1
-        # - Llegadas
+
+        # Procesar llegadas que ocurren durante la ejecución
         for p in processes:
-            if p.pid in arrived:
+            if p.pid in arrived:  # Saltar procesos que ya llegaron
                 continue
-            if time < p.arrival_time <= end and p.completion_time is None:
-                arrived.add(p.pid)
-                if handle_post(p, p.arrival_time, enq_cpu, enq_unblock, blocked, gantt):
+            if time < p.arrival_time <= end and p.completion_time is None:  # Si llega durante la ejecución
+                arrived.add(p.pid)  # Marcar como llegado
+                if handle_after_cpu_or_arrival(p, p.arrival_time, enq_cpu, blocked, gantt):
                     completed += 1
 
-        # Consumir CPU del actual y avanzar tiempo
-        current.remaining_time -= exec_time
-        time = end
-        gantt.append((current.pid, start, end, "CPU"))
+        # FASE 9: EJECUTAR PROCESO
+        # CRÍTICO: Actualizar AMBOS - remaining_time Y el burst actual
+        current.remaining_time -= exec_time  # Reducir tiempo restante
+        current.bursts[current.current_burst_index] -= exec_time  # ← ESTA LÍNEA ES CRÍTICA
+        time = end  # Avanzar el reloj del sistema
+        gantt.append((current.pid, start, end, "CPU"))  # Registrar ejecución en Gantt
 
-        # ¿Terminó ráfaga o agotó quantum?
-        if current.remaining_time == 0:
-            current.advance_burst()
-            # Si terminó el proceso
-            if current.current_burst_index >= len(current.bursts):
+        # FASE 10: DETERMINAR QUÉ HACER CON EL PROCESO
+        # ¿Terminó la ráfaga o agotó el quantum?
+        if current.remaining_time == 0:  # Si terminó la ráfaga de CPU
+            current.bursts[current.current_burst_index] = 0  # Asegurar que queda en 0
+            current.advance_burst()  # Avanzar a la siguiente ráfaga
+            
+            if current.current_burst_index >= len(current.bursts):  # Si terminó el proceso
                 current.completion_time = time
                 completed += 1
-            else:
-                # Resolver lo que sigue en el mismo tick
-                if handle_post(current, time, enq_cpu, enq_unblock, blocked, gantt):
+            else:  # Si aún tiene ráfagas
+                if handle_after_cpu_or_arrival(current, time, enq_cpu, blocked, gantt):
                     completed += 1
-        else:
-            # Ráfaga no terminó → reencolar al final
-            current.ready_since = time
-            enq_cpu.append(current)
+        else:  # Si la ráfaga no terminó (agotó quantum)
+            # Ráfaga no terminó → reencolar al final (Round Robin)
+            current.ready_since = time  # Marcar tiempo desde que está listo
+            enq_cpu.append(current)  # Agregar al buffer de CPU
 
-        # Volcar buffers con prioridad
+        # FASE 11: VOLCAR BUFFERS CON PRIORIDAD
+        # Volcar buffers a la cola de listos respetando prioridades
         if enq_cpu or enq_unblock:
-            ready.extend(enq_cpu); ready.extend(enq_unblock)
-            enq_cpu.clear(); enq_unblock.clear()
+            ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+            ready.extend(enq_unblock)  # Luego los de desbloqueo
+            enq_cpu.clear()  # Limpiar buffer de CPU
+            enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
-    # Salvaguarda final
+    # FASE FINAL: SALVAGUARDA
+    # Procesar procesos que terminaron sin completar
     for p in processes:
         if p.completion_time is None and p.current_burst_index >= len(p.bursts):
             p.completion_time = time
 
+    # Retornar resultados de la simulación
     return gantt, processes
-
 
 ...-------------------...
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\sjf.py
@@ -603,46 +1175,78 @@ from copy import deepcopy
 
 def sjf(process_list):
     """
-    SJF no expulsivo sin bloqueos.
-    Usa Process con bursts=[CPU] y remaining_time inicializado.
-    Devuelve gantt en 3-tuplas: (pid, start, end).
+    ALGORITMO SJF (Shortest Job First) - NO EXPULSIVO SIN BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en orden de duración (el más corto primero)
+    - Una vez que un proceso comienza a ejecutarse, no puede ser interrumpido
+    - No hay bloqueos de E/S, solo ráfagas de CPU
+    - Cada proceso tiene una sola ráfaga de CPU que se ejecuta completamente
+    - En cada momento, se selecciona el proceso con menor tiempo de CPU restante
+    
+    CARACTERÍSTICAS:
+    - No expulsivo: no hay preempción una vez que comienza la ejecución
+    - Sin bloqueos: no hay operaciones de E/S
+    - Optimiza tiempo de respuesta: los trabajos cortos terminan rápido
+    - Puede causar inanición: trabajos largos pueden esperar indefinidamente
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU]
+    
+    RETORNA:
+    - gantt: Lista de tuplas (pid, start, end) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
     """
+    
     # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
-    time = 0  # Reloj del sistema
+    
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
     gantt = []  # Lista para almacenar el diagrama de Gantt
     completed = 0  # Contador de procesos completados
-    n = len(processes)  # Total de procesos
+    n = len(processes)  # Total de procesos a procesar
 
-    # Para evitar reuso accidental
+    # Verificar que los procesos tengan remaining_time inicializado correctamente
+    # (esto es una verificación de seguridad, remaining_time ya viene de Process)
     for p in processes:
-        # remaining_time ya viene de Process(bursts=[cpu])
+        # remaining_time ya viene inicializado de Process(bursts=[cpu])
         pass
 
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
     while completed < n:  # Mientras no se completen todos los procesos
-        # Elegibles: llegaron y no completados
+        
+        # FASE 1: IDENTIFICAR PROCESOS ELEGIBLES
+        # Buscar procesos que han llegado y no han terminado
         elegibles = [p for p in processes if p.arrival_time <= time and p.completion_time is None]
 
+        # FASE 2: MANEJAR CPU OCIOSA
         if not elegibles:  # Si no hay procesos elegibles
-            time += 1  # Avanzar tiempo y continuar
+            time += 1  # Avanzar tiempo y continuar en la siguiente iteración
             continue
 
-        # Elegir el de menor remaining_time (única ráfaga de CPU)
+        # FASE 3: SELECCIÓN DE PROCESO (CRITERIO SJF)
+        # Elegir el proceso con menor remaining_time (trabajo más corto)
         # SJF: Shortest Job First - el trabajo más corto primero
         current = min(elegibles, key=lambda p: p.remaining_time)
 
+        # FASE 4: EJECUTAR PROCESO COMPLETAMENTE
+        # Marcar tiempo de inicio si es la primera vez que se ejecuta
         if current.start_time is None:  # Si es la primera vez que se ejecuta
-            current.start_time = time  # Marcar tiempo de inicio
+            current.start_time = time  # Marcar tiempo de inicio del proceso
 
+        # Ejecutar el proceso completamente (SJF es no expulsivo)
         start = time  # Guardar tiempo de inicio de esta ejecución
-        cpu = current.remaining_time  # Tiempo de CPU restante
-        time += cpu  # Avanzar el reloj del sistema
+        cpu = current.remaining_time  # Tiempo de CPU restante (equivale a bursts[0])
+        time += cpu  # Avanzar el reloj del sistema por el tiempo de CPU completo
         gantt.append((current.pid, start, time))  # Registrar en el diagrama de Gantt
 
+        # FASE 5: MARCAR PROCESO COMO COMPLETADO
         current.completion_time = time  # Marcar tiempo de finalización
-        current.calculate_metrics()  # Calcular métricas del proceso
-        completed += 1  # Incrementar contador de completados
+        current.calculate_metrics()  # Calcular métricas del proceso (TR, TE, etc.)
+        completed += 1  # Incrementar contador de procesos completados
 
+    # Retornar resultados de la simulación
     return gantt, processes
 
 
@@ -650,128 +1254,225 @@ def sjf(process_list):
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\sjf_blocking.py
 
 ...-------------------...
-﻿# algoritmo/sjf_blocking.py
-from copy import deepcopy
+﻿from copy import deepcopy
 
 def sjf_blocking(process_list):
+    """
+    ALGORITMO SJF (Shortest Job First) - NO EXPULSIVO CON BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en orden de duración total de CPU restante (el más corto primero)
+    - Una vez que un proceso comienza a ejecutarse, no puede ser interrumpido
+    - Los procesos pueden tener múltiples ráfagas de CPU y E/S (bloqueos)
+    - Cuando un proceso termina una ráfaga de CPU, puede ir a bloqueo o continuar con otra CPU
+    - Cuando un proceso termina un bloqueo, regresa a la cola de listos
+    - Se respeta la prioridad: procesos que terminan CPU tienen prioridad sobre los que salen de bloqueo
+    
+    CARACTERÍSTICAS:
+    - No expulsivo: no hay preempción una vez que comienza la ejecución
+    - Con bloqueos: maneja operaciones de E/S (Entrada/Salida)
+    - Optimiza tiempo de respuesta: los trabajos cortos terminan rápido
+    - Puede causar inanición: trabajos largos pueden esperar indefinidamente
+    - Maneja múltiples ráfagas: CPU → E/S → CPU → E/S → ...
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU, E/S, CPU, E/S, ...]
+    
+    RETORNA:
+    - gantt: Lista de tuplas (pid, start, end, tipo) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
+    """
+    
+    # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
 
-    # --- Helper: total de CPU restante desde la posición actual ---
     def cpu_total_restante(p):
-        idx = p.current_burst_index
-        if idx >= len(p.bursts):
+        """
+        FUNCIÓN AUXILIAR: Calcula el total de CPU restante desde la posición actual.
+        
+        Esta función es crucial para SJF ya que determina la prioridad del proceso.
+        Calcula cuánto tiempo de CPU le queda al proceso desde su posición actual.
+        
+        Args:
+            p: Proceso del cual calcular el tiempo restante
+            
+        Returns:
+            int: Total de tiempo de CPU restante
+        """
+        idx = p.current_burst_index  # Índice de la ráfaga actual
+        if idx >= len(p.bursts):  # Si el proceso terminó
             return 0
-        # si está parado en bloqueo (índice impar), la próxima CPU es idx+1
-        start = idx if idx % 2 == 0 else idx + 1
+        
         total = 0
-        for i in range(start, len(p.bursts), 2):  # sólo posiciones de CPU
-            # si es la CPU actual y ya se consumió parcialmente, el burst refleja lo que queda
+        # Si estamos en una ráfaga de CPU (índice par)
+        if idx % 2 == 0:
+            # El burst actual YA refleja lo que queda (se va descontando)
+            total += p.bursts[idx]
+            start = idx + 2  # Siguiente CPU (saltar el bloqueo)
+        else:
+            # Si estamos en bloqueo, la próxima CPU es idx+1
+            start = idx + 1
+        
+        # Sumar las ráfagas de CPU futuras
+        for i in range(start, len(p.bursts), 2):  # Solo índices pares (CPU)
             total += p.bursts[i]
+        
         return total
 
-    # Init por proceso
+    # FASE DE INICIALIZACIÓN
+    # Configurar atributos necesarios para cada proceso
     for idx, p in enumerate(processes):
+        # Guardar copia original de bursts para referencia
         if not hasattr(p, "bursts_original"):
             p.bursts_original = p.bursts[:]
+        
+        # Asignar secuencia para desempates
         p._seq = idx
-        # 'remaining_time' queda como métrica informativa; NO se usa para priorizar
+        
+        # Calcular tiempo total de CPU (solo ráfagas pares)
         p.remaining_time = sum(b for i, b in enumerate(p.bursts) if i % 2 == 0)
-        p.ready_since = None
-        p.start_time = None
-        p.completion_time = None
+        
+        # Inicializar atributos de tiempo
+        p.ready_since = None  # Tiempo desde que está listo
+        p.start_time = None  # Tiempo de primera ejecución
+        p.completion_time = None  # Tiempo de finalización
 
-    time = 0
-    gantt = []
-    ready = []
-    blocked = []      # [(proc, unblock_time)]
-    completed = 0
-    n = len(processes)
-    arrived = set()   # PIDs ya encolados por llegada
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
+    gantt = []  # Lista para almacenar el diagrama de Gantt
+    ready = []  # Lista de procesos listos para ejecutar
+    blocked = []  # Lista de procesos bloqueados: (proceso, unblock_time)
+    completed = 0  # Contador de procesos completados
+    n = len(processes)  # Total de procesos a procesar
+    arrived = set()  # Conjunto de PIDs que ya llegaron al sistema
 
-    # Buffers de encolado con prioridad
-    enq_cpu = []      # procesos que entran por llegada o fin de CPU
-    enq_unblock = []  # procesos que entran por fin de bloqueo
+    # Buffers de encolado para respetar la prioridad
+    enq_cpu = []      # procesos que entran a ready por llegada o por terminar CPU
+    enq_unblock = []  # procesos que entran a ready por desbloqueo
 
     def collapse_zeros(proc, t):
+        """
+        FUNCIÓN AUXILIAR: Saltar ráfagas de duración 0 encadenadas.
+        
+        Si un proceso tiene ráfagas de duración 0, las salta automáticamente
+        hasta encontrar una ráfaga con duración > 0 o hasta que termine el proceso.
+        
+        Args:
+            proc: Proceso a procesar
+            t: Tiempo actual
+            
+        Returns:
+            bool: True si el proceso terminó, False si aún tiene ráfagas
+        """
+        # Saltar todas las ráfagas de duración 0 consecutivas
         while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
-            proc.advance_burst()
+            proc.advance_burst()  # Avanzar a la siguiente ráfaga
+        
+        # Verificar si el proceso terminó después de saltar ráfagas 0
         if proc.current_burst_index >= len(proc.bursts):
-            proc.completion_time = t
-            return True
-        return False
+            proc.completion_time = t  # Marcar tiempo de finalización
+            return True  # El proceso terminó
+        return False  # El proceso aún tiene ráfagas
 
     def enqueue_arrivals_leq_t(t):
+        """
+        FUNCIÓN AUXILIAR: Encolar llegadas hasta tiempo t (incluido) con prioridad de llegada.
+        
+        Busca todos los procesos que han llegado al sistema hasta el tiempo t
+        y los procesa según su tipo de primera ráfaga.
+        
+        Args:
+            t: Tiempo hasta el cual buscar llegadas
+        """
         nonlocal completed
         for p in processes:
+            # Saltar procesos que ya llegaron
             if p.pid in arrived:
                 continue
+            
+            # Verificar si el proceso llegó y no ha terminado
             if p.arrival_time <= t and p.completion_time is None:
-                arrived.add(p.pid)
+                arrived.add(p.pid)  # Marcar como llegado
+                
+                # Saltar ráfagas 0 si las hay
                 if collapse_zeros(p, t):
                     completed += 1
                     continue
-                if p.is_cpu_burst():
-                    p.ready_since = p.arrival_time
-                    enq_cpu.append(p)  # llegada → prioridad CPU_FINISH
-                else:
-                    dur = p.bursts[p.current_burst_index]
-                    if dur > 0:
-                        gantt.append((p.pid, t, t + dur, "BLOCK"))
-                        blocked.append((p, t + dur))
-                    else:
-                        p.advance_burst()
+                
+                # Determinar qué tipo de ráfaga tiene el proceso al llegar
+                if p.is_cpu_burst():  # Si la primera ráfaga es de CPU
+                    p.ready_since = p.arrival_time  # Marcar tiempo desde que está listo
+                    enq_cpu.append(p)  # Agregar al buffer de CPU (alta prioridad)
+                else:  # Si la primera ráfaga es de bloqueo
+                    dur = p.bursts[p.current_burst_index]  # Duración del bloqueo
+                    if dur > 0:  # Si tiene duración
+                        gantt.append((p.pid, t, t + dur, "BLOCK"))  # Registrar bloqueo en Gantt
+                        blocked.append((p, t + dur))  # Agregar a cola de bloqueados
+                    else:  # Si es de duración 0 (bloqueo instantáneo)
+                        p.advance_burst()  # Avanzar a la siguiente ráfaga
                         if collapse_zeros(p, t):
                             completed += 1
-                        elif p.is_cpu_burst():
-                            p.ready_since = p.arrival_time
-                            enq_cpu.append(p)
+                        elif p.is_cpu_burst():  # Si la siguiente es CPU
+                            p.ready_since = p.arrival_time  # Marcar tiempo desde que está listo
+                            enq_cpu.append(p)  # Agregar al buffer de CPU
 
-    # Inicializar con todos los procesos que llegan en tiempo 0 o antes
+    # PROCESAR LLEGADAS INICIALES
     enqueue_arrivals_leq_t(time)
     if enq_cpu or enq_unblock:
-        ready.extend(enq_cpu)
-        ready.extend(enq_unblock)
-        enq_cpu.clear()
-        enq_unblock.clear()
+        ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+        ready.extend(enq_unblock)  # Luego los de desbloqueo
+        enq_cpu.clear()  # Limpiar buffer de CPU
+        enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
-    while completed < n:
-        # 1) Procesar TODOS los desbloqueos que vencieron hasta t
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
+    while completed < n:  # Mientras no se completen todos los procesos
+        
+        # FASE 1: PROCESAR DESBLOQUEOS
+        # Ordenar bloqueados por tiempo de desbloqueo
         if blocked:
             blocked.sort(key=lambda x: x[1])
-        for (bp, unb) in blocked[:]:
-            if unb <= time:
-                blocked.remove((bp, unb))
-                bp.advance_burst()
+        
+        # Procesar desbloqueos que vencen en este momento
+        for (bp, unb) in blocked[:]:  # Iterar sobre una copia de la lista
+            if unb <= time:  # Si el bloqueo termina en este momento o antes
+                blocked.remove((bp, unb))  # Remover de la cola de bloqueados
+                bp.advance_burst()  # Avanzar a la siguiente ráfaga
+                
+                # Saltar ráfagas 0 si las hay
                 if collapse_zeros(bp, time):
                     completed += 1
                     continue
-                if bp.is_cpu_burst():
-                    bp.ready_since = time
-                    enq_unblock.append(bp)  # fin de BLOQ → va detrás de CPU_FINISH
-                else:
-                    dur = bp.bursts[bp.current_burst_index]
-                    if dur > 0:
-                        gantt.append((bp.pid, time, time + dur, "BLOCK"))
-                        blocked.append((bp, time + dur))
-                    else:
-                        bp.advance_burst()
+                
+                # Determinar qué tipo de ráfaga sigue
+                if bp.is_cpu_burst():  # Si la siguiente ráfaga es de CPU
+                    bp.ready_since = time  # Marcar tiempo desde que está listo
+                    enq_unblock.append(bp)  # Agregar al buffer de desbloqueo (baja prioridad)
+                else:  # Si la siguiente ráfaga es de bloqueo
+                    dur = bp.bursts[bp.current_burst_index]  # Duración del bloqueo
+                    if dur > 0:  # Si tiene duración
+                        gantt.append((bp.pid, time, time + dur, "BLOCK"))  # Registrar bloqueo en Gantt
+                        blocked.append((bp, time + dur))  # Agregar a cola de bloqueados
+                    else:  # Si es de duración 0 (bloqueo instantáneo)
+                        bp.advance_burst()  # Avanzar a la siguiente ráfaga
                         if collapse_zeros(bp, time):
                             completed += 1
-                        elif bp.is_cpu_burst():
-                            bp.ready_since = time
-                            enq_unblock.append(bp)
+                        elif bp.is_cpu_burst():  # Si la siguiente es CPU
+                            bp.ready_since = time  # Marcar tiempo desde que está listo
+                            enq_unblock.append(bp)  # Agregar al buffer de desbloqueo
 
-        # 2) Encolar llegadas que hayan llegado hasta este momento
+        # FASE 2: PROCESAR LLEGADAS
         enqueue_arrivals_leq_t(time)
 
-        # 2.1) Volcar buffers a ready con prioridad CPU_FINISH > UNBLOCK
+        # FASE 3: VOLCAR BUFFERS A COLA DE LISTOS
+        # Volcar buffers a ready respetando prioridades
         if enq_cpu or enq_unblock:
-            ready.extend(enq_cpu)
-            ready.extend(enq_unblock)
-            enq_cpu.clear()
-            enq_unblock.clear()
+            ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+            ready.extend(enq_unblock)  # Luego los de desbloqueo
+            enq_cpu.clear()  # Limpiar buffer de CPU
+            enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
-        # 3) Si no hay listos, saltar al siguiente evento
+        # FASE 4: MANEJAR CPU OCIOSA
+        # Si no hay procesos listos, saltar al siguiente evento
         if not ready:
             future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived and p.completion_time is None]
             future_unblocks = [unb for _, unb in blocked]
@@ -787,21 +1488,27 @@ def sjf_blocking(process_list):
                 time += 1
             continue
 
-        # 4) Selección SJF **por total de CPU restante**
+        # FASE 5: SELECCIÓN DE PROCESO (CRITERIO SJF)
+        # Filtrar procesos que aún tienen ráfagas
         ready = [p for p in ready if p.current_burst_index < len(p.bursts)]
+        
+        # Ordenar por criterio SJF con desempates
         ready.sort(key=lambda x: (
-            cpu_total_restante(x),                 # menor CPU total restante
-            (x.ready_since if x.ready_since is not None else x.arrival_time),
-            x.pid
+            cpu_total_restante(x),  # SJF: menor tiempo total de CPU restante (prioridad principal)
+            (x.ready_since if x.ready_since is not None else x.arrival_time),  # FIFO en empates
+            x.pid  # Estabilidad (desempate por PID)
         ))
 
+        # Seleccionar el proceso con menor tiempo total de CPU restante
         current = ready.pop(0)
+        
+        # Marcar tiempo de inicio si es la primera vez que se ejecuta
         if current.start_time is None:
             current.start_time = time
 
-        # 5) Ejecutar ráfaga completa
-        start = time
-        cpu_dur = current.bursts[current.current_burst_index]
+        # FASE 6: EJECUTAR RÁFAGA COMPLETA (SJF es no expulsivo)
+        start = time  # Tiempo de inicio de esta ejecución
+        cpu_dur = current.bursts[current.current_burst_index]  # Duración de la ráfaga de CPU
         if cpu_dur <= 0:
             if collapse_zeros(current, time):
                 completed += 1
@@ -812,14 +1519,19 @@ def sjf_blocking(process_list):
             continue
 
         time += cpu_dur
-        # 'remaining_time' se ajusta solo como dato; no afecta prioridad
+        
+        # CRÍTICO: Actualizar tanto remaining_time como el burst actual
         if hasattr(current, "remaining_time") and current.remaining_time is not None:
             current.remaining_time -= cpu_dur
             if current.remaining_time < 0:
                 current.remaining_time = 0
+        
+        # IMPORTANTE: Marcar la ráfaga como completada
+        current.bursts[current.current_burst_index] = 0
+        
         gantt.append((current.pid, start, time, "CPU"))
 
-        # 6) Avanzar bursts y re-encolar según corresponda
+        # Avanzar bursts
         current.advance_burst()
         if collapse_zeros(current, time):
             completed += 1
@@ -841,7 +1553,7 @@ def sjf_blocking(process_list):
                     current.ready_since = time
                     enq_cpu.append(current)
 
-        # 6.1) Volcar buffers a ready con prioridad
+        # Volcar buffers
         if enq_cpu or enq_unblock:
             ready.extend(enq_cpu)
             ready.extend(enq_unblock)
@@ -849,7 +1561,6 @@ def sjf_blocking(process_list):
             enq_unblock.clear()
 
     return gantt, processes
-
 
 ...-------------------...
 Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\srtf.py
@@ -859,66 +1570,102 @@ from copy import deepcopy
 
 def srtf(process_list):
     """
-    Simula la planificación SRTF (Shortest Remaining Time First, expulsivo).
-
-    :param process_list: lista de objetos Process
-    :return: (gantt_chart, procesos_con_metricas)
+    ALGORITMO SRTF (Shortest Remaining Time First) - EXPULSIVO SIN BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en orden de tiempo restante (el más corto primero)
+    - En cada unidad de tiempo, se selecciona el proceso con menor tiempo restante
+    - Los procesos pueden ser interrumpidos si llega uno con menor tiempo restante
+    - No hay bloqueos de E/S, solo ráfagas de CPU
+    - Cada proceso tiene una sola ráfaga de CPU que se ejecuta por unidades de tiempo
+    
+    CARACTERÍSTICAS:
+    - Expulsivo: los procesos pueden ser preemptados en cualquier momento
+    - Sin bloqueos: no hay operaciones de E/S
+    - Optimiza tiempo de respuesta: los trabajos cortos tienen prioridad
+    - Puede causar inanición: trabajos largos pueden ser postergados indefinidamente
+    - Muy responsivo: responde inmediatamente a trabajos más cortos
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU]
+    
+    RETORNA:
+    - gantt_chart: Lista de tuplas (pid, start, end) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
     """
+    
     # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
-    n = len(processes)  # Total de procesos
+    
+    # Inicializar variables del simulador
+    n = len(processes)  # Total de procesos a procesar
     completed = 0  # Contador de procesos completados
-    time = 0  # Reloj del sistema
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
     gantt_chart = []  # Lista para almacenar el diagrama de Gantt
 
-    # Para controlar cambios de proceso
+    # Variables para controlar cambios de proceso en el diagrama de Gantt
     current_pid = None  # PID del proceso actualmente en ejecución
     start_time = None  # Tiempo de inicio del bloque actual en Gantt
 
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
     while completed < n:  # Mientras no se completen todos los procesos
-        # Filtrar procesos listos y no completados
+        
+        # FASE 1: IDENTIFICAR PROCESOS LISTOS
+        # Filtrar procesos que han llegado y aún tienen tiempo restante
         ready_queue = [p for p in processes if p.arrival_time <= time and p.remaining_time > 0]
 
+        # FASE 2: SELECCIÓN DE PROCESO (CRITERIO SRTF)
         if ready_queue:  # Si hay procesos listos para ejecutar
-            # Elegir el de menor tiempo restante, con desempate por FIFO
+            
+            # Ordenar por criterio SRTF con desempates
             ready_queue.sort(key=lambda x: (
                 x.remaining_time,  # SRTF: menor tiempo restante (prioridad principal)
                 x.arrival_time,    # FIFO en empates (desempate por llegada)
-                x.pid             # estabilidad (desempate por PID)
+                x.pid             # Estabilidad (desempate por PID)
             ))
+            
+            # Seleccionar el proceso con menor tiempo restante
             current = ready_queue[0]  # Tomar el proceso con menor tiempo restante
 
-            # Si cambia el proceso en ejecución, cerramos el bloque anterior
+            # FASE 3: CONTROL DE CAMBIOS DE PROCESO EN GANTT
+            # Si cambia el proceso en ejecución, cerrar el bloque anterior
             if current_pid != current.pid:  # Si cambió el proceso
                 if current_pid is not None:  # Si había un proceso anterior
                     gantt_chart.append((current_pid, start_time, time))  # Cerrar bloque anterior
                 current_pid = current.pid  # Actualizar PID actual
                 start_time = time  # Marcar inicio del nuevo bloque
+                
+                # Marcar tiempo de inicio si es la primera vez que se ejecuta
                 if current.start_time is None:  # Si es la primera vez que se ejecuta
                     current.start_time = time  # Marcar tiempo de inicio del proceso
 
-            # Ejecutar 1 unidad de tiempo (SRTF es expulsivo)
-            current.remaining_time -= 1  # Reducir tiempo restante
+            # FASE 4: EJECUTAR PROCESO POR 1 UNIDAD DE TIEMPO
+            # Ejecutar 1 unidad de tiempo (SRTF es expulsivo por unidades)
+            current.remaining_time -= 1  # Reducir tiempo restante del proceso
             time += 1  # Avanzar el reloj del sistema
 
-            # Si termina
+            # FASE 5: VERIFICAR SI EL PROCESO TERMINÓ
             if current.remaining_time == 0:  # Si el proceso terminó
                 current.completion_time = time  # Marcar tiempo de finalización
-                current.calculate_metrics()  # Calcular métricas del proceso
-                completed += 1  # Incrementar contador de completados
-        else:  # No hay procesos listos
-            # CPU ociosa
+                current.calculate_metrics()  # Calcular métricas del proceso (TR, TE, etc.)
+                completed += 1  # Incrementar contador de procesos completados
+                
+        else:  # No hay procesos listos: CPU ociosa
+            # CONTROL DE PERÍODOS IDLE EN GANTT
             if current_pid != "IDLE":  # Si no está marcado como IDLE
                 if current_pid is not None:  # Si había un proceso anterior
                     gantt_chart.append((current_pid, start_time, time))  # Cerrar bloque anterior
                 current_pid = "IDLE"  # Marcar como IDLE
                 start_time = time  # Marcar inicio del período IDLE
-            time += 1  # Avanzar tiempo sin ejecutar nada
+            
+            # Avanzar tiempo sin ejecutar nada
+            time += 1
 
-    # Cerrar el último bloque
+    # Cerrar el último bloque del diagrama de Gantt
     if current_pid is not None:
         gantt_chart.append((current_pid, start_time, time))
 
+    # Retornar resultados de la simulación
     return gantt_chart, processes
 
 
@@ -929,172 +1676,319 @@ Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\algoritmos\srtf_blo
 from copy import deepcopy
 
 def srtf_blocking(process_list):
-    """SRTF expulsivo con soporte para bloqueos, usando get_total_cpu_remaining()."""
+    """
+    ALGORITMO SRTF (Shortest Remaining Time First) - EXPULSIVO CON BLOQUEOS
+    
+    FUNCIONAMIENTO:
+    - Los procesos se ejecutan en orden de tiempo total de CPU restante (el más corto primero)
+    - En cada unidad de tiempo, se selecciona el proceso con menor tiempo total restante
+    - Los procesos pueden ser interrumpidos si llega uno con menor tiempo total restante
+    - Los procesos pueden tener múltiples ráfagas de CPU y E/S (bloqueos)
+    - Cuando un proceso termina una ráfaga de CPU, puede ir a bloqueo o continuar con otra CPU
+    - Cuando un proceso termina un bloqueo, regresa a la cola de listos
+    - Se respeta la prioridad: procesos que terminan CPU tienen prioridad sobre los que salen de bloqueo
+    
+    CARACTERÍSTICAS:
+    - Expulsivo: los procesos pueden ser preemptados en cualquier momento
+    - Con bloqueos: maneja operaciones de E/S (Entrada/Salida)
+    - Optimiza tiempo de respuesta: los trabajos cortos tienen prioridad
+    - Puede causar inanición: trabajos largos pueden ser postergados indefinidamente
+    - Muy responsivo: responde inmediatamente a trabajos más cortos
+    - Maneja múltiples ráfagas: CPU → E/S → CPU → E/S → ...
+    
+    PARÁMETROS:
+    - process_list: Lista de objetos Process con bursts=[CPU, E/S, CPU, E/S, ...]
+    
+    RETORNA:
+    - gantt: Lista de tuplas (pid, start, end, tipo) para el diagrama de Gantt
+    - processes: Lista de procesos con métricas calculadas
+    """
 
     def collapse_zeros(proc, t):
+        """
+        FUNCIÓN AUXILIAR: Saltar ráfagas de duración 0 encadenadas.
+        
+        Si un proceso tiene ráfagas de duración 0, las salta automáticamente
+        hasta encontrar una ráfaga con duración > 0 o hasta que termine el proceso.
+        
+        Args:
+            proc: Proceso a procesar
+            t: Tiempo actual
+            
+        Returns:
+            bool: True si el proceso terminó, False si aún tiene ráfagas
+        """
+        # Saltar todas las ráfagas de duración 0 consecutivas
         while proc.current_burst_index < len(proc.bursts) and proc.bursts[proc.current_burst_index] == 0:
-            proc.advance_burst()
+            proc.advance_burst()  # Avanzar a la siguiente ráfaga
+        
+        # Verificar si el proceso terminó después de saltar ráfagas 0
         if proc.current_burst_index >= len(proc.bursts):
-            proc.completion_time = t
-            return True
-        return False
+            proc.completion_time = t  # Marcar tiempo de finalización
+            return True  # El proceso terminó
+        return False  # El proceso aún tiene ráfagas
 
     def handle_post(proc, t, destino_cpu, destino_unblock, destino_blocked, gantt):
+        """
+        FUNCIÓN AUXILIAR: Resolver transición tras fin de ráfaga.
+        
+        Determina qué hacer con un proceso después de que termina una ráfaga.
+        Puede ir a CPU, bloqueo, o terminar.
+        
+        Args:
+            proc: Proceso a procesar
+            t: Tiempo actual
+            destino_cpu: Buffer de procesos que van a CPU
+            destino_unblock: Buffer de procesos que salen de bloqueo
+            destino_blocked: Lista de procesos bloqueados
+            gantt: Lista del diagrama de Gantt
+            
+        Returns:
+            bool: True si el proceso terminó, False si continúa
+        """
+        # Primero saltar ráfagas 0 si las hay
         if collapse_zeros(proc, t):
-            return True
-        if proc.is_cpu_burst():
-            destino_cpu.append(proc)
-        else:
-            dur = proc.bursts[proc.current_burst_index]
-            if dur > 0:
-                gantt.append((proc.pid, t, t + dur, "BLOCK"))
-                destino_blocked.append((proc, t + dur))
-            else:
-                proc.advance_burst()
+            return True  # El proceso terminó
+        
+        # Determinar qué tipo de ráfaga sigue
+        if proc.is_cpu_burst():  # Si la siguiente ráfaga es de CPU
+            destino_cpu.append(proc)  # Agregar al buffer correspondiente
+        else:  # Si la siguiente ráfaga es de bloqueo
+            dur = proc.bursts[proc.current_burst_index]  # Duración del bloqueo
+            if dur > 0:  # Si tiene duración
+                gantt.append((proc.pid, t, t + dur, "BLOCK"))  # Registrar bloqueo en Gantt
+                destino_blocked.append((proc, t + dur))  # Agregar a cola de bloqueados
+            else:  # Si es de duración 0 (bloqueo instantáneo)
+                proc.advance_burst()  # Avanzar a la siguiente ráfaga
+                # Llamar recursivamente para procesar la siguiente ráfaga
                 return handle_post(proc, t, destino_cpu, destino_unblock, destino_blocked, gantt)
-        return False
+        return False  # El proceso continúa
 
+    # Crear copia profunda para no modificar la lista original
     processes = deepcopy(process_list)
+    
+    # FASE DE INICIALIZACIÓN
+    # Configurar atributos necesarios para cada proceso
     for idx, p in enumerate(processes):
+        # Guardar copia original de bursts para referencia
         if not hasattr(p, "bursts_original"):
             p.bursts_original = p.bursts[:]
+        
+        # Asignar secuencia para desempates
         p._seq = idx
-        p.ready_since = None
-        p.start_time = None
-        p.completion_time = None
+        
+        # Inicializar atributos de tiempo
+        p.ready_since = None  # Tiempo desde que está listo
+        p.start_time = None  # Tiempo de primera ejecución
+        p.completion_time = None  # Tiempo de finalización
 
-    time = 0
-    gantt = []
-    ready = []
-    blocked = []
-    completed = 0
-    n = len(processes)
-    arrived = set()
+    # Inicializar variables del simulador
+    time = 0  # Reloj del sistema (tiempo actual de simulación)
+    gantt = []  # Lista para almacenar el diagrama de Gantt
+    ready = []  # Lista de procesos listos para ejecutar
+    blocked = []  # Lista de procesos bloqueados: (proceso, unblock_time)
+    completed = 0  # Contador de procesos completados
+    n = len(processes)  # Total de procesos a procesar
+    arrived = set()  # Conjunto de PIDs que ya llegaron al sistema
 
-    enq_cpu = []
-    enq_unblock = []
+    # Buffers de encolado para respetar la prioridad
+    enq_cpu = []      # procesos que entran a ready por llegada o por terminar CPU
+    enq_unblock = []  # procesos que entran a ready por desbloqueo
 
     def enqueue_arrivals_leq_t(t):
+        """
+        FUNCIÓN AUXILIAR: Encolar llegadas hasta tiempo t (incluido) con prioridad de llegada.
+        
+        Busca todos los procesos que han llegado al sistema hasta el tiempo t
+        y los procesa según su tipo de primera ráfaga.
+        
+        Args:
+            t: Tiempo hasta el cual buscar llegadas
+        """
         nonlocal completed
         for p in processes:
+            # Saltar procesos que ya llegaron
             if p.pid in arrived:
                 continue
+            
+            # Verificar si el proceso llegó y no ha terminado
             if p.arrival_time <= t and p.completion_time is None:
-                arrived.add(p.pid)
+                arrived.add(p.pid)  # Marcar como llegado
+                # Procesar llegada usando la función auxiliar
                 if handle_post(p, t, enq_cpu, enq_unblock, blocked, gantt):
                     completed += 1
 
     def process_unblocks_leq_t(t):
+        """
+        FUNCIÓN AUXILIAR: Procesar desbloqueos hasta tiempo t (incluido).
+        
+        Busca todos los procesos que terminan su bloqueo hasta el tiempo t
+        y los procesa según su tipo de siguiente ráfaga.
+        
+        Args:
+            t: Tiempo hasta el cual buscar desbloqueos
+        """
         nonlocal completed
-        for (bp, unb) in blocked[:]:
-            if unb <= t:
-                blocked.remove((bp, unb))
-                bp.advance_burst()
+        for (bp, unb) in blocked[:]:  # Iterar sobre una copia de la lista
+            if unb <= t:  # Si el bloqueo termina en este momento o antes
+                blocked.remove((bp, unb))  # Remover de la cola de bloqueados
+                bp.advance_burst()  # Avanzar a la siguiente ráfaga
+                # Procesar desbloqueo usando la función auxiliar
                 if handle_post(bp, t, enq_unblock, enq_unblock, blocked, gantt):
                     completed += 1
 
+    # PROCESAR LLEGADAS INICIALES
     enqueue_arrivals_leq_t(time)
     if enq_cpu or enq_unblock:
-        ready.extend(enq_cpu)
-        ready.extend(enq_unblock)
-        enq_cpu.clear()
-        enq_unblock.clear()
+        ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+        ready.extend(enq_unblock)  # Luego los de desbloqueo
+        enq_cpu.clear()  # Limpiar buffer de CPU
+        enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
-    current = None
-    seg_start = None
+    # Variables para controlar la ejecución actual
+    current = None  # Proceso actualmente en ejecución
+    seg_start = None  # Tiempo de inicio del segmento actual en Gantt
 
-    while completed < n:
+    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
+    while completed < n:  # Mientras no se completen todos los procesos
+        
+        # FASE 1: PROCESAR EVENTOS
+        # Procesar desbloqueos que vencen en este momento
         process_unblocks_leq_t(time)
+        
+        # Procesar llegadas en este momento
         enqueue_arrivals_leq_t(time)
 
+        # FASE 2: VOLCAR BUFFERS A COLA DE LISTOS
+        # Volcar buffers a ready respetando prioridades
         if enq_cpu or enq_unblock:
-            ready.extend(enq_cpu)
-            ready.extend(enq_unblock)
-            enq_cpu.clear()
-            enq_unblock.clear()
+            ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+            ready.extend(enq_unblock)  # Luego los de desbloqueo
+            enq_cpu.clear()  # Limpiar buffer de CPU
+            enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
+        # FASE 3: IDENTIFICAR PROCESOS ELEGIBLES
+        # Filtrar procesos que están en ráfaga de CPU y no han terminado
         eligibles = [p for p in ready if p.is_cpu_burst() and not p.is_finished()]
-        if not eligibles:
+        
+        # FASE 4: MANEJAR CPU OCIOSA
+        if not eligibles:  # Si no hay procesos elegibles
+            # Buscar próximos eventos (llegadas y desbloqueos)
             future_arrivals = [p.arrival_time for p in processes if p.pid not in arrived and p.completion_time is None]
             future_unblocks = [unb for _, unb in blocked]
+            
+            # Verificar si no hay más eventos futuros
             if not future_arrivals and not future_unblocks:
-                break
+                break  # Terminar simulación
+            
+            # Calcular el próximo evento
             next_event = min(future_arrivals + future_unblocks) if (future_arrivals or future_unblocks) else None
+            
+            # Avanzar tiempo hasta el próximo evento
             if next_event is None:
                 time += 1
             elif next_event > time:
-                gantt.append(("IDLE", time, next_event, "IDLE"))
+                gantt.append(("IDLE", time, next_event, "IDLE"))  # Registrar período IDLE
                 time = next_event
             else:
                 time += 1
+            
+            # Limpiar proceso actual
             current = None
             seg_start = None
             continue
 
-        eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.ready_since or x.arrival_time, x.pid))
-        candidate = eligibles[0]
+        # FASE 5: SELECCIÓN DE PROCESO (CRITERIO SRTF)
+        # Ordenar por criterio SRTF con desempates
+        eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.arrival_time, x._seq, x.pid))
+        candidate = eligibles[0]  # Seleccionar el proceso con menor tiempo total restante
 
-        if current is not candidate:
+        # FASE 6: CONTROL DE CAMBIOS DE PROCESO EN GANTT
+        if current is not candidate:  # Si cambió el proceso
+            # Cerrar segmento anterior si existe
             if current is not None and seg_start is not None and time > seg_start:
                 gantt.append((current.pid, seg_start, time, "CPU"))
+            
+            # Cambiar al nuevo proceso
             current = candidate
-            seg_start = time
+            seg_start = time  # Marcar inicio del nuevo segmento
+            
+            # Marcar tiempo de inicio si es la primera vez que se ejecuta
             if current.start_time is None:
                 current.start_time = time
 
-        # Ejecutar 1 tick
-        current.bursts[current.current_burst_index] -= 1
-        current.remaining_time = current.get_total_cpu_remaining()
-        time += 1
+        # FASE 7: EJECUTAR PROCESO POR 1 UNIDAD DE TIEMPO
+        # Ejecutar 1 tick de CPU (SRTF es expulsivo por unidades)
+        current.bursts[current.current_burst_index] -= 1  # Reducir ráfaga actual
+        current.remaining_time = current.get_total_cpu_remaining()  # Actualizar tiempo restante
+        time += 1  # Avanzar el reloj del sistema
 
-        # Fin de ráfaga
-        if current.bursts[current.current_burst_index] == 0:
+        # FASE 8: VERIFICAR SI TERMINÓ LA RÁFAGA
+        if current.bursts[current.current_burst_index] == 0:  # Si terminó la ráfaga de CPU
+            # Cerrar segmento de CPU en el diagrama de Gantt
             gantt.append((current.pid, seg_start, time, "CPU"))
-            current.advance_burst()
-            if current.is_finished():
+            current.advance_burst()  # Avanzar a la siguiente ráfaga
+            
+            if current.is_finished():  # Si terminó el proceso
                 current.completion_time = time
                 completed += 1
-                current = None
+                current = None  # Liberar CPU
                 seg_start = None
-            else:
+            else:  # Si aún tiene ráfagas
                 if handle_post(current, time, enq_cpu, enq_unblock, blocked, gantt):
                     completed += 1
-                current = None
+                current = None  # Liberar CPU
                 seg_start = None
+            
+            # Volcar buffers después de terminar ráfaga
             if enq_cpu or enq_unblock:
-                ready.extend(enq_cpu)
-                ready.extend(enq_unblock)
-                enq_cpu.clear()
-                enq_unblock.clear()
-            continue
+                ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+                ready.extend(enq_unblock)  # Luego los de desbloqueo
+                enq_cpu.clear()  # Limpiar buffer de CPU
+                enq_unblock.clear()  # Limpiar buffer de desbloqueo
+            continue  # Volver al inicio del bucle
 
-        # Preempción
-        process_unblocks_leq_t(time)
-        enqueue_arrivals_leq_t(time)
+        # FASE 9: VERIFICAR PREEMPCIÓN
+        # Procesar eventos que pueden causar preempción
+        process_unblocks_leq_t(time)  # Procesar desbloqueos
+        enqueue_arrivals_leq_t(time)  # Procesar llegadas
+        
+        # Volcar buffers después de procesar eventos
         if enq_cpu or enq_unblock:
-            ready.extend(enq_cpu)
-            ready.extend(enq_unblock)
-            enq_cpu.clear()
-            enq_unblock.clear()
+            ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+            ready.extend(enq_unblock)  # Luego los de desbloqueo
+            enq_cpu.clear()  # Limpiar buffer de CPU
+            enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
+        # FASE 10: VERIFICAR PREEMPCIÓN POR PROCESO MÁS CORTO
+        # Re-evaluar si hay un proceso más corto que puede preemptar
         eligibles = [p for p in ready if p.is_cpu_burst() and not p.is_finished()]
-        if eligibles:
-            eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.ready_since or x.arrival_time, x.pid))
-            best = eligibles[0]
+        if eligibles:  # Si hay procesos elegibles
+            # Ordenar por criterio SRTF
+            eligibles.sort(key=lambda x: (x.get_total_cpu_remaining(), x.arrival_time, x._seq, x.pid))
+            best = eligibles[0]  # El mejor proceso candidato
+            
+            # Verificar si debe preemptar al proceso actual
             if best is not current and best.get_total_cpu_remaining() < current.get_total_cpu_remaining():
-                gantt.append((current.pid, seg_start, time, "CPU"))
-                current.ready_since = time
-                enq_cpu.append(current)
-                current = None
+                # Preemptar: cerrar segmento actual y cambiar proceso
+                gantt.append((current.pid, seg_start, time, "CPU"))  # Cerrar segmento actual
+                current.ready_since = time  # Marcar tiempo desde que está listo
+                enq_cpu.append(current)  # Agregar proceso actual al buffer
+                current = None  # Liberar CPU
                 seg_start = None
-                ready.extend(enq_cpu)
-                ready.extend(enq_unblock)
-                enq_cpu.clear()
-                enq_unblock.clear()
+                
+                # Volcar buffers inmediatamente
+                ready.extend(enq_cpu)  # Agregar procesos de CPU primero
+                ready.extend(enq_unblock)  # Luego los de desbloqueo
+                enq_cpu.clear()  # Limpiar buffer de CPU
+                enq_unblock.clear()  # Limpiar buffer de desbloqueo
 
+    # FASE FINAL: CERRAR ÚLTIMO SEGMENTO
+    # Cerrar el último segmento del diagrama de Gantt si existe
     if current is not None and seg_start is not None and time > seg_start:
         gantt.append((current.pid, seg_start, time, "CPU"))
 
+    # Retornar resultados de la simulación
     return gantt, processes
 
 
@@ -1126,6 +2020,9 @@ from algoritmos.fifo_blocking import fifo_blocking
 from algoritmos.sjf_blocking import sjf_blocking
 from algoritmos.srtf_blocking import srtf_blocking
 from algoritmos.round_robin_blocking import round_robin_blocking
+# Algoritmos de prioridades
+from algoritmos.priority import priority
+from algoritmos.priority_blocking import priority_blocking
 
 from utils.metricas import calcular_metricas
 from utils.excel_export import exportar_a_excel
@@ -1158,11 +2055,30 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.pan_start_y = None
         self.is_panning = False
 
+        # --- Detectar uso de prioridades ---
+        self.usar_prioridades = self._detectar_uso_prioridades()
+
         # --- Selección de algoritmo ---
         self.label_title = ctk.CTkLabel(self, text="Seleccionar algoritmo", font=("Arial", 18, "bold"))
         self.label_title.pack(pady=10)
+        
+        # --- Indicador de prioridades ---
+        if self.usar_prioridades:
+            self.label_prioridades = ctk.CTkLabel(self, text="ℹ️ Ejercicio con prioridades detectado", 
+                                                font=("Arial", 12), text_color="blue")
+        else:
+            self.label_prioridades = ctk.CTkLabel(self, text="ℹ️ Ejercicio sin prioridades", 
+                                                font=("Arial", 12), text_color="gray")
+        self.label_prioridades.pack(pady=2)
 
-        self.algoritmos = ["FIFO", "SJF", "SRTF", "Round Robin"]
+        # Lista base de algoritmos (siempre disponibles)
+        self.algoritmos_base = ["FIFO", "SJF", "SRTF", "Round Robin"]
+        
+        # Algoritmos de prioridades (solo si se usan prioridades)
+        if self.usar_prioridades:
+            self.algoritmos = self.algoritmos_base + ["Prioridades", "Prioridades con Bloqueos"]
+        else:
+            self.algoritmos = self.algoritmos_base
         self.selected_algo = ctk.StringVar(value=self.algoritmos[0])
         self.option_menu = ctk.CTkOptionMenu(
             self, values=self.algoritmos, variable=self.selected_algo, command=self._on_algo_change
@@ -1229,8 +2145,13 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.entry_quantum.pack(side="left", padx=5)
 
         # --- Tabla BCP ---
-        self.tree = ttk.Treeview(self, columns=("PID", "Llegada", "CPU", "TR", "TE"), show="headings", height=8)
-        for col in ("PID", "Llegada", "CPU", "TR", "TE"):
+        if self.usar_prioridades:
+            columns = ("PID", "Llegada", "Prioridad", "CPU", "TR", "TE")
+        else:
+            columns = ("PID", "Llegada", "CPU", "TR", "TE")
+            
+        self.tree = ttk.Treeview(self, columns=columns, show="headings", height=8)
+        for col in columns:
             self.tree.heading(col, text=col)
             self.tree.column(col, width=80, anchor="center")
         self.tree.pack(pady=10, fill="x")
@@ -1243,6 +2164,13 @@ class AlgorithmScreen(ctk.CTkFrame):
         self.frame_gantt = ctk.CTkFrame(self)
         self.frame_gantt.pack(pady=10, fill="both", expand=True)
 
+    def _detectar_uso_prioridades(self):
+        """Detecta si algún proceso tiene prioridad > 0 (diferente a la prioridad por defecto)."""
+        for proceso in self.procesos_data:
+            if proceso.get("priority", 0) > 0:
+                return True
+        return False
+
     def _on_algo_change(self, value):
         if value == "Round Robin":
             self.frame_quantum.pack(before=self.tree, pady=5)
@@ -1252,7 +2180,7 @@ class AlgorithmScreen(ctk.CTkFrame):
     def _run_algorithm(self):
         # Crear copias de los procesos para no modificar los originales
         from copy import deepcopy
-        procesos = [Process(p["pid"], p["arrival_time"], p["bursts"]) for p in self.procesos_data]
+        procesos = [Process(p["pid"], p["arrival_time"], p["bursts"], p.get("priority", 0)) for p in self.procesos_data]
         algo = self.selected_algo.get()
 
         try:
@@ -1272,6 +2200,15 @@ class AlgorithmScreen(ctk.CTkFrame):
                     gantt, result = round_robin_blocking(procesos, quantum)
                 else:
                     gantt, result = round_robin(procesos, quantum)
+            elif algo == "Prioridades":
+                # Detectar si los procesos tienen bloqueos
+                tiene_bloqueos = any(len(p["bursts"]) > 1 for p in self.procesos_data)
+                if tiene_bloqueos:
+                    gantt, result = priority_blocking(procesos)
+                else:
+                    gantt, result = priority(procesos)
+            elif algo == "Prioridades con Bloqueos":
+                gantt, result = priority_blocking(procesos)
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error al ejecutar: {e}")
             return
@@ -1283,7 +2220,13 @@ class AlgorithmScreen(ctk.CTkFrame):
         for row in self.tree.get_children():
             self.tree.delete(row)
         for m in metricas:
-            self.tree.insert("", "end", values=(m["PID"], m["Llegada"], m["CPU"], m["TR"], m["TE"]))
+            if self.usar_prioridades:
+                # Obtener la prioridad del proceso original
+                priority = next((p.get("priority", 0) for p in self.procesos_data if p["pid"] == m["PID"]), 0)
+                self.tree.insert("", "end", values=(m["PID"], m["Llegada"], priority, m["CPU"], m["TR"], m["TE"]))
+            else:
+                # Sin columna de prioridad
+                self.tree.insert("", "end", values=(m["PID"], m["Llegada"], m["CPU"], m["TR"], m["TE"]))
 
         # Actualizar promedios
         self.label_promedios.configure(
@@ -1575,7 +2518,12 @@ class AlgorithmScreen(ctk.CTkFrame):
             return
         
         # Determinar si hacer zoom in o out
-        if event.delta > 0:
+        # Manejar diferentes plataformas (Windows usa delta, Linux/Mac usan step)
+        delta = getattr(event, 'delta', None)
+        if delta is None:
+            delta = getattr(event, 'step', 0)
+        
+        if delta > 0:
             self._zoom_in()
         else:
             self._zoom_out()
@@ -1923,7 +2871,7 @@ class DataInputScreen(ctk.CTkFrame):
         self.on_continue = on_continue
 
         # Estructura de datos para múltiples ráfagas
-        self.process_data = {}  # {nombre: {"arrival": int, "bursts": [int, int, ...]}}
+        self.process_data = {}  # {nombre: {"arrival": int, "priority": int, "bursts": [int, int, ...]}}
         
         self.label_title = ctk.CTkLabel(self, text="Ingresar datos de procesos", font=("Arial", 18, "bold"))
         self.label_title.pack(pady=20)
@@ -1954,6 +2902,7 @@ class DataInputScreen(ctk.CTkFrame):
             # Inicializar datos del proceso
             self.process_data[nombre] = {
                 "arrival": None,
+                "priority": 0,  # Prioridad por defecto
                 "bursts": []
             }
             
@@ -1974,6 +2923,18 @@ class DataInputScreen(ctk.CTkFrame):
             ctk.CTkLabel(arrival_frame, text="Tiempo de llegada:", width=120).pack(side="left", padx=5)
             arrival_entry = ctk.CTkEntry(arrival_frame, placeholder_text="Ej: 0", width=80)
             arrival_entry.pack(side="left", padx=5)
+            
+            # Prioridad
+            priority_frame = ctk.CTkFrame(process_frame)
+            priority_frame.pack(fill="x", padx=5, pady=2)
+            
+            ctk.CTkLabel(priority_frame, text="Prioridad (0-9):", width=120).pack(side="left", padx=5)
+            priority_entry = ctk.CTkEntry(priority_frame, placeholder_text="Ej: 5", width=80)
+            priority_entry.pack(side="left", padx=5)
+            
+            # Tooltip para explicar prioridades
+            ctk.CTkLabel(priority_frame, text="(9=mayor prioridad, 0=menor prioridad)", 
+                        font=("Arial", 10), text_color="gray").pack(side="left", padx=10)
             
             # Frame para las ráfagas
             bursts_frame = ctk.CTkFrame(process_frame)
@@ -1996,6 +2957,7 @@ class DataInputScreen(ctk.CTkFrame):
             
             # Almacenar referencias para este proceso
             self.process_data[nombre]["arrival_entry"] = arrival_entry
+            self.process_data[nombre]["priority_entry"] = priority_entry
             self.process_data[nombre]["bursts_display_frame"] = bursts_display_frame
             self.process_data[nombre]["burst_entries"] = []
             
@@ -2100,6 +3062,15 @@ class DataInputScreen(ctk.CTkFrame):
                 if arrival_time < 0:
                     raise ValueError(f"Proceso {nombre}: Tiempo de llegada debe ser ≥ 0")
                 
+                # Validar prioridad
+                priority_str = process_info["priority_entry"].get().strip()
+                if not priority_str:
+                    priority = 0  # Prioridad por defecto
+                else:
+                    priority = int(priority_str)
+                    if priority < 0 or priority > 9:
+                        raise ValueError(f"Proceso {nombre}: Prioridad debe estar entre 0 y 9")
+                
                 # Validar ráfagas
                 burst_entries = process_info["burst_entries"]
                 if not burst_entries:
@@ -2133,6 +3104,7 @@ class DataInputScreen(ctk.CTkFrame):
                 procesos_data.append({
                     "pid": nombre, 
                     "arrival_time": arrival_time, 
+                    "priority": priority,
                     "bursts": bursts
                 })
 
@@ -2189,6 +3161,10 @@ class DataInputScreen(ctk.CTkFrame):
                     arrival_str = process_info["arrival_entry"].get().strip()
                     arrival = int(arrival_str) if arrival_str else 0
                     
+                    # Obtener prioridad
+                    priority_str = process_info["priority_entry"].get().strip()
+                    priority = int(priority_str) if priority_str else 0
+                    
                     # Obtener ráfagas
                     bursts = []
                     for burst_info in process_info["burst_entries"]:
@@ -2199,6 +3175,7 @@ class DataInputScreen(ctk.CTkFrame):
                     config_procesos.append({
                         "nombre": nombre_proceso,
                         "arrival": arrival,
+                        "priority": priority,
                         "bursts": bursts
                     })
                 
@@ -2368,6 +3345,11 @@ class DataInputScreen(ctk.CTkFrame):
                         process_info["arrival_entry"].delete(0, "end")
                         process_info["arrival_entry"].insert(0, str(proceso_config["arrival"]))
                     
+                    # Aplicar prioridad (si existe en la configuración, sino usar 0)
+                    priority = proceso_config.get("priority", 0)
+                    process_info["priority_entry"].delete(0, "end")
+                    process_info["priority_entry"].insert(0, str(priority))
+                    
                     # Aplicar ráfagas
                     bursts = proceso_config["bursts"]
                     if bursts:
@@ -2398,6 +3380,9 @@ class DataInputScreen(ctk.CTkFrame):
                 
                 # Limpiar tiempo de llegada
                 process_info["arrival_entry"].delete(0, "end")
+                
+                # Limpiar prioridad
+                process_info["priority_entry"].delete(0, "end")
                 
                 # Limpiar ráfagas
                 for burst_info in process_info["burst_entries"][:]:
@@ -2521,7 +3506,7 @@ Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\models\process.py
 ...-------------------...
 # GanddOperativos/models/process.py
 class Process:
-    def __init__(self, pid, arrival_time, bursts):
+    def __init__(self, pid, arrival_time, bursts, priority=0):
         """
         Representa un proceso con ráfagas de CPU y bloqueos (E/S).
 
@@ -2529,6 +3514,7 @@ class Process:
         :param arrival_time: Tiempo de llegada inicial al sistema
         :param bursts: Lista de enteros, índices pares = CPU, impares = bloqueo
                        Ej: [3, 2, 5] => CPU 3, Bloqueo 2, CPU 5
+        :param priority: Prioridad del proceso (entero, mayor número = mayor prioridad)
         """
         self.pid = pid
         self.arrival_time = arrival_time
@@ -2536,6 +3522,7 @@ class Process:
         self.bursts_original = bursts[:]     # copia inmutable para métricas
         self.current_burst_index = 0
         self.remaining_time = bursts[0] if bursts else 0
+        self.priority = priority             # Prioridad del proceso (mayor número = mayor prioridad)
 
         # Métricas
         self.start_time = None
@@ -2646,8 +3633,8 @@ class Process:
 
     def __repr__(self):
         return (f"Process(pid={self.pid}, arrival={self.arrival_time}, bursts={self.bursts}, "
-                f"idx={self.current_burst_index}, start={self.start_time}, completion={self.completion_time}, "
-                f"TR={self.turnaround_time}, TE={self.waiting_time})")
+                f"priority={self.priority}, idx={self.current_burst_index}, start={self.start_time}, "
+                f"completion={self.completion_time}, TR={self.turnaround_time}, TE={self.waiting_time})")
 
 
 ...-------------------...
@@ -3298,6 +4285,109 @@ Archivo: C:\Users\Federixco\Documents\GitHub\GanddOperativos\utils\input_histori
                     9,
                     252,
                     8
+                ]
+            }
+        ]
+    },
+    {
+        "nombre": "punto1 guianueva",
+        "fecha": "2025-09-21T19:52:30",
+        "procesos": [
+            {
+                "nombre": "A",
+                "arrival": 0,
+                "bursts": [
+                    4,
+                    2,
+                    2,
+                    1,
+                    1
+                ]
+            },
+            {
+                "nombre": "B",
+                "arrival": 0,
+                "bursts": [
+                    2,
+                    3,
+                    4,
+                    2,
+                    2
+                ]
+            },
+            {
+                "nombre": "C",
+                "arrival": 0,
+                "bursts": [
+                    4,
+                    1,
+                    3,
+                    3,
+                    4
+                ]
+            },
+            {
+                "nombre": "D",
+                "arrival": 2,
+                "bursts": [
+                    5,
+                    2,
+                    2,
+                    1,
+                    1
+                ]
+            },
+            {
+                "nombre": "E",
+                "arrival": 3,
+                "bursts": [
+                    4,
+                    3,
+                    6,
+                    2,
+                    2
+                ]
+            },
+            {
+                "nombre": "F",
+                "arrival": 5,
+                "bursts": [
+                    7,
+                    2,
+                    4,
+                    4,
+                    4
+                ]
+            },
+            {
+                "nombre": "G",
+                "arrival": 7,
+                "bursts": [
+                    1,
+                    2,
+                    3,
+                    1,
+                    2
+                ]
+            },
+            {
+                "nombre": "H",
+                "arrival": 7,
+                "bursts": [
+                    3,
+                    4,
+                    3,
+                    4,
+                    3
+                ]
+            },
+            {
+                "nombre": "I",
+                "arrival": 8,
+                "bursts": [
+                    8,
+                    4,
+                    1
                 ]
             }
         ]

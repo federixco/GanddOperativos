@@ -1,101 +1,95 @@
+# utils/historial.py
 import json
 import os
 from datetime import datetime
+from .paths import data_path  # usa storage persistente (AppData o modo portable)
 
-HISTORIAL_FILE = os.path.join(os.path.dirname(__file__), "historial.json")
+# Un único archivo para TODO el historial de inputs
+INPUT_HIST_FILE = data_path("input_historial.json")
 
-def _leer_historial():
-    if os.path.exists(HISTORIAL_FILE):
-        with open(HISTORIAL_FILE, "r", encoding="utf-8") as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                return []
-    return []
 
-def _guardar_historial(data):
-    with open(HISTORIAL_FILE, "w", encoding="utf-8") as f:
+# ------------ utilidades de IO ------------
+def _safe_load_json(path):
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+def _safe_save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+    try:
+        os.replace(tmp, path)
+    except Exception:
+        # Fallback si os.replace no está disponible
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
 
-def guardar_ejercicio(nombre, procesos, algoritmo, quantum=None):
-    """
-    Guarda un ejercicio en el historial.
-    procesos: lista de dicts con {"pid":..., "arrival_time":..., "bursts": [...]}
-    """
-    historial = _leer_historial()
-    entrada = {
-        "nombre": nombre,
-        "fecha": datetime.now().isoformat(timespec="seconds"),
-        "algoritmo": algoritmo,
-        "quantum": quantum,
-        "procesos": procesos
-    }
-    historial.append(entrada)
-    _guardar_historial(historial)
 
-def listar_historial():
-    """Devuelve una lista de (indice, nombre, fecha, algoritmo) para mostrar en la GUI."""
-    historial = _leer_historial()
-    return [(i, h["nombre"], h["fecha"], h["algoritmo"]) for i, h in enumerate(historial)]
-
-def cargar_ejercicio(indice):
-    """Devuelve el ejercicio guardado en la posición 'indice'."""
-    historial = _leer_historial()
-    if 0 <= indice < len(historial):
-        return historial[indice]
-    return None
-
-# ===== FUNCIONES PARA INPUTS DE DATOS =====
-
-INPUT_HISTORIAL_FILE = os.path.join(os.path.dirname(__file__), "input_historial.json")
-
+# ===== HISTORIAL DE CONFIGURACIONES DE INPUT =====
 def _leer_input_historial():
-    """Lee el historial de inputs desde el archivo JSON."""
-    if os.path.exists(INPUT_HISTORIAL_FILE):
-        with open(INPUT_HISTORIAL_FILE, "r", encoding="utf-8") as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                return []
-    return []
+    return _safe_load_json(INPUT_HIST_FILE)
 
 def _guardar_input_historial(data):
-    """Guarda el historial de inputs en el archivo JSON.""" #a partir de esto se puede cargar luego.
-    with open(INPUT_HISTORIAL_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    _safe_save_json(INPUT_HIST_FILE, data)
 
 def guardar_input_config(nombre, procesos_config):
     """
-    Guarda una configuración de inputs en el historial.
-    procesos_config: lista de dicts con {"nombre": str, "arrival": int, "bursts": [int, ...]}
+    Guarda una configuración de inputs.
+    procesos_config: lista de dicts con:
+      {"nombre": str, "arrival": int, "priority": int (opcional), "bursts": [int, ...]}
     """
-    historial = _leer_input_historial()
+    data = _leer_input_historial()
     entrada = {
         "nombre": nombre,
         "fecha": datetime.now().isoformat(timespec="seconds"),
         "procesos": procesos_config
     }
-    historial.append(entrada)
-    _guardar_input_historial(historial)
+    data.append(entrada)
+    _guardar_input_historial(data)
+    return entrada
 
 def listar_input_configs():
-    """Devuelve una lista de (indice, nombre, fecha, num_procesos) para mostrar en la GUI."""
-    historial = _leer_input_historial()
-    return [(i, h["nombre"], h["fecha"], len(h["procesos"])) for i, h in enumerate(historial)]
+    """
+    Devuelve lista de (indice, nombre, fecha, num_procesos) para mostrar en la GUI.
+    """
+    data = _leer_input_historial()
+    return [
+        (i, it.get("nombre", f"Config {i+1}"),
+         it.get("fecha", ""),
+         len(it.get("procesos", [])))
+        for i, it in enumerate(data)
+    ]
 
 def cargar_input_config(indice):
-    """Devuelve la configuración de inputs guardada en la posición 'indice'."""
-    historial = _leer_input_historial()
-    if 0 <= indice < len(historial):
-        return historial[indice]
+    """
+    Devuelve la configuración de inputs guardada en la posición 'indice'.
+    """
+    data = _leer_input_historial()
+    if 0 <= indice < len(data):
+        return data[indice]
     return None
 
 def eliminar_input_config(indice):
-    """Elimina una configuración de inputs del historial."""
-    historial = _leer_input_historial()
-    if 0 <= indice < len(historial):
-        nombre_eliminado = historial[indice]["nombre"]
-        del historial[indice]
-        _guardar_input_historial(historial)
-        return nombre_eliminado
+    """
+    Elimina una configuración de inputs del historial y devuelve su nombre.
+    """
+    data = _leer_input_historial()
+    if 0 <= indice < len(data):
+        nombre = data[indice].get("nombre")
+        del data[indice]
+        _guardar_input_historial(data)
+        return nombre
     return None
+# DEBUG/ayuda: devolver la ruta donde realmente se guarda
+def input_historial_path():
+    return INPUT_HIST_FILE
