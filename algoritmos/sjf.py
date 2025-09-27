@@ -2,76 +2,72 @@ from copy import deepcopy
 
 def sjf(process_list):
     """
-    ALGORITMO SJF (Shortest Job First) - NO EXPULSIVO SIN BLOQUEOS
-    
-    FUNCIONAMIENTO:
-    - Los procesos se ejecutan en orden de duración (el más corto primero)
-    - Una vez que un proceso comienza a ejecutarse, no puede ser interrumpido
-    - No hay bloqueos de E/S, solo ráfagas de CPU
-    - Cada proceso tiene una sola ráfaga de CPU que se ejecuta completamente
-    - En cada momento, se selecciona el proceso con menor tiempo de CPU restante
-    
-    CARACTERÍSTICAS:
-    - No expulsivo: no hay preempción una vez que comienza la ejecución
-    - Sin bloqueos: no hay operaciones de E/S
-    - Optimiza tiempo de respuesta: los trabajos cortos terminan rápido
-    - Puede causar inanición: trabajos largos pueden esperar indefinidamente
-    
-    PARÁMETROS:
-    - process_list: Lista de objetos Process con bursts=[CPU]
-    
-    RETORNA:
-    - gantt: Lista de tuplas (pid, start, end) para el diagrama de Gantt
-    - processes: Lista de procesos con métricas calculadas
+    SJF (Shortest Job First) no expulsivo, SIN bloqueos.
+    Criterio: menor ráfaga total de CPU del proceso (inmutable), sin usar “tiempo restante”.
+    Retorna: gantt = [(pid, start, end)], processes
     """
-    
-    # Crear copia profunda para no modificar la lista original
+
     processes = deepcopy(process_list)
-    
-    # Inicializar variables del simulador
-    time = 0  # Reloj del sistema (tiempo actual de simulación)
-    gantt = []  # Lista para almacenar el diagrama de Gantt
-    completed = 0  # Contador de procesos completados
-    n = len(processes)  # Total de procesos a procesar
 
-    # Verificar que los procesos tengan remaining_time inicializado correctamente
-    # (esto es una verificación de seguridad, remaining_time ya viene de Process)
-    for p in processes:
-        # remaining_time ya viene inicializado de Process(bursts=[cpu])
-        pass
+    # --- Init por proceso ---
+    for idx, p in enumerate(processes):
+        # Foto original por si otros módulos mutan bursts
+        if not hasattr(p, "bursts_original"):
+            p.bursts_original = p.bursts[:]
 
-    # BUCLE PRINCIPAL: Simular hasta que todos los procesos terminen
-    while completed < n:  # Mientras no se completen todos los procesos
-        
-        # FASE 1: IDENTIFICAR PROCESOS ELEGIBLES
-        # Buscar procesos que han llegado y no han terminado
+        # ráfaga única de CPU (sin bloqueos). Si falta, asumimos 0.
+        p.cpu_burst = p.bursts_original[0] if p.bursts_original else 0
+
+        p._seq = idx
+        if not hasattr(p, "arrival_time"):
+            p.arrival_time = getattr(p, "arrival", 0)
+        if not hasattr(p, "start_time"):
+            p.start_time = None
+        p.completion_time = None
+
+    time = 0
+    gantt = []
+    completed = 0
+    n = len(processes)
+
+    # Bucle principal
+    safe_iters = 0
+    while completed < n and safe_iters < 200000:
+        safe_iters += 1
+
+        # Elegibles que ya llegaron y no terminaron
         elegibles = [p for p in processes if p.arrival_time <= time and p.completion_time is None]
 
-        # FASE 2: MANEJAR CPU OCIOSA
-        if not elegibles:  # Si no hay procesos elegibles
-            time += 1  # Avanzar tiempo y continuar en la siguiente iteración
+        if not elegibles:
+            # Saltar al próximo arribo (evitar time += 1 en vacío)
+            future_arrivals = [p.arrival_time for p in processes if p.completion_time is None and p.arrival_time > time]
+            if not future_arrivals:
+                # Nada más por llegar: estamos ociosos pero no hay trabajo -> cortar
+                break
+            time = min(future_arrivals)
             continue
 
-        # FASE 3: SELECCIÓN DE PROCESO (CRITERIO SJF)
-        # Elegir el proceso con menor remaining_time (trabajo más corto)
-        # SJF: Shortest Job First - el trabajo más corto primero
-        current = min(elegibles, key=lambda p: p.remaining_time)
+        # Selección SJF: por ráfaga inmutable, luego FIFO por llegada y orden estable
+        elegibles.sort(key=lambda x: (x.cpu_burst, x.arrival_time, x._seq))
+        current = elegibles[0]
 
-        # FASE 4: EJECUTAR PROCESO COMPLETAMENTE
-        # Marcar tiempo de inicio si es la primera vez que se ejecuta
-        if current.start_time is None:  # Si es la primera vez que se ejecuta
-            current.start_time = time  # Marcar tiempo de inicio del proceso
+        # Marcar inicio si corresponde
+        if current.start_time is None:
+            current.start_time = time
 
-        # Ejecutar el proceso completamente (SJF es no expulsivo)
-        start = time  # Guardar tiempo de inicio de esta ejecución
-        cpu = current.remaining_time  # Tiempo de CPU restante (equivale a bursts[0])
-        time += cpu  # Avanzar el reloj del sistema por el tiempo de CPU completo
-        gantt.append((current.pid, start, time))  # Registrar en el diagrama de Gantt
+        # Ejecutar COMPLETO (no apropiativo)
+        start = time
+        cpu = max(0, int(current.cpu_burst))  # sanidad: entero >= 0
+        time += cpu
+        gantt.append((current.pid, start, time))
 
-        # FASE 5: MARCAR PROCESO COMO COMPLETADO
-        current.completion_time = time  # Marcar tiempo de finalización
-        current.calculate_metrics()  # Calcular métricas del proceso (TR, TE, etc.)
-        completed += 1  # Incrementar contador de procesos completados
+        # Terminar proceso y métricas
+        current.completion_time = time
+        if hasattr(current, "calculate_metrics"):
+            try:
+                current.calculate_metrics()
+            except Exception:
+                pass
+        completed += 1
 
-    # Retornar resultados de la simulación
     return gantt, processes
