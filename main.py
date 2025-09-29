@@ -11,7 +11,7 @@ def ir_a_nombres(payload):
     payload puede ser:
       - int: cantidad de procesos (flujo clásico: Start -> NameInput)
       - dict con:
-          {"action": "load_config", "data": {...}}  -> ABRIR CONFIG directamente en AlgorithmScreen
+          {"action": "load_config"  , "data": {...}}  -> ABRIR CONFIG directamente en AlgorithmScreen
           {"action": "open_exercise", "data": {...}}-> ABRIR EJERCICIO directamente en AlgorithmScreen
     """
     # Caso clásico: número de procesos -> NameInput
